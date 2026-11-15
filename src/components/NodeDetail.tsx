@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 
-import { LOSS_SCALE, TimeChart, type ChartSeries } from "@/components/Chart"
+import { LOSS_SCALE, lossColor, TimeChart, type ChartSeries } from "@/components/Chart"
 import { PingTooltip } from "@/components/ChartTooltip"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -10,6 +10,7 @@ import { api, type Node } from "@/lib/api"
 import {
   axisBytes, axisTop, bytes, despike, cpuName, osName, rate, uptime,
 } from "@/lib/format"
+import { ms, pingStats } from "@/lib/pingstats"
 import { rangesFor } from "@/lib/ranges"
 
 type Point = {
@@ -350,6 +351,15 @@ export function NodeDetail({ node, historyDays }: {
     [data],
   )
 
+  // 延迟统计表的数：按时间排好再算（「当前」与抖动都依赖先后顺序），只随数据变，不随隐藏/削峰变。
+  const pingStatsById = useMemo(
+    () => new Map(pingSeries.map((s) => [
+      s.id,
+      pingStats([...s.points].sort((a, b) => a.ts - b.ts).map((p) => p.latency)),
+    ])),
+    [pingSeries],
+  )
+
   // The hub answers in seconds; the time axis requires milliseconds.
   const metricRows = useMemo(
     () => (data?.metrics ?? []).map((m) => ({ ...m, ts: m.ts * 1_000 })),
@@ -607,7 +617,9 @@ export function NodeDetail({ node, historyDays }: {
             //   不然页面一滚动、实时读数每两秒一帧，高度就会跟着滚动的距离重新算。
             ref={chartBox}
             style={chartTop ? { height: `calc(100svh - ${Math.round(chartTop)}px - 1rem)` } : undefined}
-            className="h-full min-h-72">
+            // 最小高度 27rem：统计表（表头 + 每条线路一行）摆在面板里，手机上 calc 出来的高度很小，
+            // 原来的 min-h-72 会把图挤到不足 100px。
+            className="h-full min-h-[27rem]">
             <Panel fill title="网络延迟">
             <div className="flex h-full min-h-0 flex-col gap-3">
             {/* `min-h-0` is what makes `flex-1` a real number rather than the
@@ -642,52 +654,78 @@ export function NodeDetail({ node, historyDays }: {
                 drawn in it is picked here. Recharts paints the brush into the
                 same SVG as the axis, so this is as close beneath as HTML
                 sits. */}
-            {(pingSeries.length > 1 || pingSeries.some((s) => s.loss > 0)) && (
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {pingSeries.map((s) => {
-                const shown = !hiddenProbes.includes(s.id)
-                return (
-                  <button
-                    key={s.id}
-                    aria-pressed={shown}
-                    onClick={() =>
+            {/* 延迟统计表（兼图例）：一条线路一行，数字跟着上面选的时间范围走。
+                单击一行显示/隐藏这条线，双击只看这一条（进 Smokeping 画法）——
+                双击前面那两次单击一显一隐正好抵消。窄屏只留「当前 / 平均 / 丢包」三列。 */}
+            <div className="-mx-1 overflow-x-auto">
+              <table className="w-full min-w-0 text-xs tabular-nums">
+                <thead className="text-muted-foreground">
+                  <tr className="[&>th]:px-1.5 [&>th]:pb-1 [&>th]:text-right [&>th]:font-normal">
+                    <th className="!text-left">
+                      线路 <span className="opacity-70">· ms</span>
+                      {pingSeries.length > 1 && !smokeping && <span className="ml-1.5 hidden opacity-70 sm:inline">（双击单看）</span>}
+                    </th>
+                    <th>当前</th>
+                    <th>平均</th>
+                    <th className="hidden sm:table-cell">中位</th>
+                    <th className="hidden sm:table-cell" title="95% 的时间延迟不超过这个数">P95</th>
+                    <th className="hidden sm:table-cell">最低</th>
+                    <th className="hidden sm:table-cell">最高</th>
+                    <th className="hidden sm:table-cell" title="相邻两次延迟之差的平均值，越小越稳">抖动</th>
+                    <th>丢包</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pingSeries.map((s) => {
+                    const shown = !hiddenProbes.includes(s.id)
+                    const st = pingStatsById.get(s.id)
+                    const toggle = () =>
                       setHiddenProbes((h) => (shown ? [...h, s.id] : h.filter((id) => id !== s.id)))
-                    }
-                    // 双击＝只看这一条（进 Smokeping 画法）；它前面那两次单击一显一隐正好抵消。
-                    onDoubleClick={() => setHiddenProbes(pingSeries.filter((p) => p.id !== s.id).map((p) => p.id))}
-                    title="单击显示/隐藏，双击只看这一条"
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-opacity ${
-                      shown ? "" : "opacity-40"
-                    }`}
-                  >
-                    {/* The swatch carries the same shade and dash as the line. */}
-                    <svg width="14" height="6" className="shrink-0" aria-hidden>
-                      <line
-                        x1="0"
-                        y1="3"
-                        x2="14"
-                        y2="3"
-                        stroke={style(s.id).stroke}
-                        strokeDasharray={style(s.id).dash}
-                        strokeWidth="2"
-                      />
-                    </svg>
-                    {s.name}
-                    {/* The line is only what answered, so a probe dropping
-                        half its packets draws like a healthy one. */}
-                    {s.loss > 0 && (
-                      <span className="tabular-nums opacity-60">
-                        丢 {s.loss < 1 ? "<1" : Math.round(s.loss)}%
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-              {pingSeries.length > 1 && !smokeping && (
-                <span className="px-1 text-xs text-muted-foreground">双击线路单看延迟与丢包</span>
-              )}
+                    return (
+                      <tr
+                        key={s.id}
+                        onClick={toggle}
+                        onDoubleClick={() => setHiddenProbes(pingSeries.filter((p) => p.id !== s.id).map((p) => p.id))}
+                        title="单击显示/隐藏，双击只看这一条"
+                        className={`cursor-pointer select-none border-t transition-opacity hover:bg-muted/50 [&>td]:px-1.5 [&>td]:py-1 [&>td]:text-right ${
+                          shown ? "" : "opacity-40"
+                        }`}
+                      >
+                        <td className="!text-left">
+                          {/* 键盘可达：行本身不可聚焦，焦点落在这枚按钮上；回车/空格触发的 click
+                              冒泡给行去切换，按钮自己不再处理（否则一按切两次）。 */}
+                          <button
+                            type="button"
+                            aria-pressed={shown}
+                            className="inline-flex items-center gap-1.5 whitespace-nowrap"
+                          >
+                            {/* 色块与线同色同线型。 */}
+                            <svg width="14" height="6" className="shrink-0" aria-hidden>
+                              <line x1="0" y1="3" x2="14" y2="3" stroke={style(s.id).stroke} strokeDasharray={style(s.id).dash} strokeWidth="2" />
+                            </svg>
+                            {s.name}
+                          </button>
+                        </td>
+                        <td className="font-medium text-foreground">{ms(st?.now ?? null)}</td>
+                        <td>{ms(st?.avg ?? null)}</td>
+                        <td className="hidden sm:table-cell">{ms(st?.median ?? null)}</td>
+                        <td className="hidden sm:table-cell">{ms(st?.p95 ?? null)}</td>
+                        <td className="hidden sm:table-cell">{ms(st?.min ?? null)}</td>
+                        <td className="hidden sm:table-cell">{ms(st?.max ?? null)}</td>
+                        <td className="hidden sm:table-cell">{ms(st?.jitter ?? null)}</td>
+                        {/* 丢包率取 hub 给的按样本加权值；有丢包就用 Smokeping 那档颜色。 */}
+                        <td
+                          className={s.loss > 0 ? "font-medium" : "text-muted-foreground"}
+                          style={s.loss > 0 ? { color: lossColor(s.loss) } : undefined}
+                        >
+                          {s.loss <= 0 ? "0%" : s.loss < 1 ? "<1%" : `${s.loss < 10 ? s.loss.toFixed(1) : Math.round(s.loss)}%`}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-            )}
             {/* Smokeping 视图的丢包图例：中位线的颜色就是这一段的丢包档。 */}
             {smokeping && (
               <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
