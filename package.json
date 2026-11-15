@@ -1,7 +1,7 @@
 {
   "name": "monitor-theme-linbei",
   "private": true,
-  "version": "1.9.3",
+  "version": "1.10.0",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node src/lib/format.test.ts && node src/lib/api.test.ts && node src/lib/notes.test.ts && node src/lib/ranges.test.ts",
+    "test": "node src/lib/format.test.ts && node src/lib/api.test.ts && node src/lib/notes.test.ts && node src/lib/ranges.test.ts && node src/lib/pingstats.test.ts",
     "check": "node scripts/check-config.mjs",
     "preview": "vite preview",
     "package": "npm run build && npm run check && node scripts/package.mjs"
