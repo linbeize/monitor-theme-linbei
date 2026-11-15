@@ -11,7 +11,8 @@ import { autoRange, clockFor, innerTicks, nearestIndexByTime, quarters, timeTick
  *   · Y 轴从 0 起、刻度就是 `quarters(top)`（top 由 `axisTop` 定，所以四格是整数）；
  *   · X 轴是**真时间轴**（`timeTicks` 给的显式刻度），不是按序号排的类别轴 ——
  *     否则 agent 掉线那段时间会被压成 0 宽，看着像什么都没发生；
- *   · 断点照断：某个采样是 null（那一段没数据）就断开重起一笔，不连桥；
+ *   · 断点照断：某个采样是 null（探了但全超时）就断开重起一笔；键缺失（这个桶里没有这条线）
+ *     跳过不断；相邻采样隔得比本线正常步长远很多（离线）也断开；
  *   · 折线不带点、1.5px、无入场动画（`SERIES` 那三条注释说的就是这些）；
  *   · 悬停时画一条竖线 + 那枚自绘 tooltip（`ChartTooltip`，本来就跟 recharts 解耦，
  *     只是 props 恰好同形）。
@@ -28,7 +29,33 @@ export type ChartSeries = {
   /** 区间（band）：这一列的值是 `[低, 高]`，画成两条边之间的一块淡色（Smokeping 那种「烟」）。 */
   band?: boolean
   dash?: string
+  /**
+   * 连续几个 `null`（探了但全超时）以内**不断线**，直接连到下一个答上来的点（延迟线开 2）。
+   * 丢包另有图下方的丢包条标出来，线本身就不必为一两个丢掉的包碎成几十截。默认 0＝照断。
+   */
+  bridge?: number
+  /**
+   * Smokeping 式丢包着色：这一列（`l<id>`，0~100）是每个桶的丢包率。设了它，折线就**按段换色**
+   * （每一段取它右端那个桶的丢包档，跨过超时桶的那段取跨过的最坏一档），全丢（100%）的桶再画一整列
+   * 淡红竖条。`color` 只用于 tooltip 的小圆点。
+   */
+  lossKey?: string
 }
+
+/**
+ * Smokeping 的丢包配色（默认 20 包那套：0 绿、1 青、2 蓝、3 靛、4~10 紫、10~19 品红、全丢红），
+ * 换成百分比档。亮度压了一档，白卡上才看得清（原版那支 #26ff00 荧光绿在白底上几乎隐形）。
+ */
+export const LOSS_SCALE: { max: number; color: string; label: string }[] = [
+  { max: 0, color: "#16a34a", label: "0" },
+  { max: 5, color: "#0ea5e9", label: "≤5%" },
+  { max: 10, color: "#2563eb", label: "≤10%" },
+  { max: 20, color: "#6d28d9", label: "≤20%" },
+  { max: 50, color: "#a21caf", label: "≤50%" },
+  { max: 99.999, color: "#db2777", label: "<100%" },
+  { max: Infinity, color: "#dc2626", label: "全丢" },
+]
+export const lossColor = (loss: number) => (LOSS_SCALE.find((b) => loss <= b.max) ?? LOSS_SCALE[LOSS_SCALE.length - 1]).color
 
 export type ChartRow = { ts: number } & Record<string, number | [number, number] | null | undefined>
 
@@ -43,6 +70,29 @@ const FONT = 11
 const CHAR = 6.2
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null)
+
+/**
+ * 这一行**有没有**这条线的采样：键不在场（`undefined`）＝这个桶里本来就没有这条线的数据
+ * （多条探测按桶合并成一行时，频率不同 / 落在相邻桶里的那条在这一行就是缺键），应当**跳过**；
+ * 显式 `null` 才是「这个桶探了、全超时」，要断开。原来两者一视同仁，于是线路 A 有采样、
+ * 线路 B 没有的每一行都把 B 截断 —— 这正是 recharts 时代 `connectNulls` 替它们挡掉的那件事。
+ */
+const absent = (v: unknown) => v === undefined
+
+/**
+ * 一条线自己的「正常步长」：相邻两个**在场**采样的时间差取中位数。超过它 GAP_FACTOR 倍的空当
+ * 当成真断档（节点离线、hub 没存数据）照断，不拉一条直线糊过去。
+ */
+const GAP_FACTOR = 4
+function gapLimit(view: ChartRow[], key: string): number {
+  const ts: number[] = []
+  for (const row of view) if (!absent(row[key])) ts.push(row.ts)
+  const diffs: number[] = []
+  for (let i = 1; i < ts.length; i++) if (ts[i] > ts[i - 1]) diffs.push(ts[i] - ts[i - 1])
+  if (!diffs.length) return Infinity
+  diffs.sort((a, b) => a - b)
+  return diffs[diffs.length >> 1] * GAP_FACTOR
+}
 
 /** 取值域（band 那一列是 [低, 高]，两条边都要算进去）。 */
 function extentOf(view: ChartRow[], keys: string[]): [number, number] | null {
@@ -308,18 +358,41 @@ export function TimeChart({
   const geometry = useMemo(() => {
     /** 一条曲线：null 断开重起一笔（不连桥）。 */
     const lineOf = (s: ChartSeries) => {
+      const limit = gapLimit(view, s.key)
+      const bridge = s.bridge ?? 0
       let d = ""
       let pen = false
+      let last = -Infinity
+      /** 上一个答上来的点之后，连着几个 null。 */
+      let misses = 0
+      // 孤点（前后都断开的单个采样）只有一个 M、画不出东西：补一段零长线，靠圆头线帽画成一个点。
+      let lone = ""
       for (const row of view) {
-        const v = num(row[s.key])
+        const raw = row[s.key]
+        if (absent(raw)) continue
+        const v = num(raw)
         if (v === null) {
-          pen = false
+          misses += 1
           continue
         }
-        d += `${pen ? "L" : "M"}${x(row.ts).toFixed(1)},${y(v).toFixed(1)}`
+        if (pen && (misses > bridge || row.ts - last > limit)) {
+          d += lone
+          lone = ""
+          pen = false
+        }
+        misses = 0
+        last = row.ts
+        const pt = `${x(row.ts).toFixed(1)},${y(v).toFixed(1)}`
+        if (pen) {
+          d += `L${pt}`
+          lone = ""
+        } else {
+          d += `M${pt}`
+          lone = `L${pt}`
+        }
         pen = true
       }
-      return d
+      return d + lone
     }
 
     /** 面积：每一段连续的点各自闭合成一块（同样不跨断点）。 */
@@ -339,12 +412,15 @@ export function TimeChart({
         )
         run = []
       }
+      const limit = gapLimit(view, s.key)
+      let last = -Infinity
       for (const row of view) {
-        const v = num(row[s.key])
-        if (v === null) {
-          flush()
-          continue
-        }
+        const raw = row[s.key]
+        if (absent(raw)) continue
+        const v = num(raw)
+        if (v === null || row.ts - last > limit) flush()
+        last = row.ts
+        if (v === null) continue
         run.push({ x: x(row.ts), y: y(v) })
       }
       flush()
@@ -365,30 +441,104 @@ export function TimeChart({
         out.push(`M${up}L${down}Z`)
         run = []
       }
+      const limit = gapLimit(view, s.key)
+      const bridge = s.bridge ?? 0
+      let last = -Infinity
+      let misses = 0
       for (const row of view) {
         const pair = row[s.key]
+        if (absent(pair)) continue
         const lo = num(Array.isArray(pair) ? pair[0] : null)
         const hi = num(Array.isArray(pair) ? pair[1] : null)
         if (lo === null || hi === null) {
-          flush()
+          misses += 1
           continue
         }
+        if (misses > bridge || row.ts - last > limit) flush()
+        misses = 0
+        last = row.ts
         run.push({ x: x(row.ts), lo, hi })
       }
       flush()
       return out
     }
 
-    const out = new Map<string, { line: string; areas: string[]; bands: string[] }>()
+    /**
+     * Smokeping 式折线：按段换色，同色相邻段并成一条 path（一档颜色一条），再加全丢的竖条。
+     * 断开的口径与 lineOf 一致（bridge / 时间空档）。
+     */
+    const lossLineOf = (s: ChartSeries, lossKey: string) => {
+      const limit = gapLimit(view, s.key)
+      const bridge = s.bridge ?? 0
+      const byColor = new Map<string, string>()
+      const add = (color: string, d: string) => byColor.set(color, (byColor.get(color) ?? "") + d)
+      const columns: { x: number; w: number; ts: number }[] = []
+      const step = limit / GAP_FACTOR
+      const bw = Number.isFinite(step) ? Math.max(2, (step / span) * plotW) : 2
+      let prev: { pt: string; color: string } | null = null
+      /** 当前这一笔用的颜色（同色就接着 L，换色就从上一个点 M 起新的一段）。 */
+      let pen = ""
+      /** 这一笔里有没有画出过线段（没有就是孤点，收尾时补成一个点）。 */
+      let drew = false
+      let last = -Infinity
+      let misses = 0
+      let worst = 0
+      const endRun = () => {
+        if (prev && !drew) add(prev.color, `M${prev.pt}L${prev.pt}`)
+        prev = null
+        pen = ""
+        drew = false
+      }
+      for (const row of view) {
+        const raw = row[s.key]
+        if (absent(raw)) continue
+        const loss = num(row[lossKey]) ?? 0
+        if (loss >= 100) {
+          const cx = x(row.ts)
+          columns.push({ x: cx - bw / 2, w: bw, ts: row.ts })
+        }
+        const v = num(raw)
+        if (v === null) {
+          misses += 1
+          worst = Math.max(worst, loss)
+          continue
+        }
+        if (prev && (misses > bridge || row.ts - last > limit)) endRun()
+        const color = lossColor(Math.max(loss, misses ? worst : 0))
+        const pt = `${x(row.ts).toFixed(1)},${y(v).toFixed(1)}`
+        if (prev) {
+          add(color, color === pen ? `L${pt}` : `M${prev.pt}L${pt}`)
+          pen = color
+          drew = true
+        }
+        prev = { pt, color }
+        misses = 0
+        worst = 0
+        last = row.ts
+      }
+      endRun()
+      return { segs: [...byColor].map(([color, d]) => ({ color, d })), columns }
+    }
+
+    const out = new Map<string, {
+      line: string
+      areas: string[]
+      bands: string[]
+      segs: { color: string; d: string }[]
+      columns: { x: number; w: number; ts: number }[]
+    }>()
     for (const s of series) {
+      const lossy = !s.band && s.lossKey ? lossLineOf(s, s.lossKey) : null
       out.set(s.key, {
-        line: s.band ? "" : lineOf(s),
+        line: s.band || lossy ? "" : lineOf(s),
         areas: s.area ? areasOf(s) : [],
         bands: s.band ? bandsOf(s) : [],
+        segs: lossy?.segs ?? [],
+        columns: lossy?.columns ?? [],
       })
     }
-    return out
-  }, [view, series, x, y, plotH])
+    return { paths: out }
+  }, [view, series, x, y, plotH, span, plotW])
 
   /**
    * ★按**时间**找最近的一行，不是按数组下标（2026-10-20 审出）。
@@ -479,21 +629,27 @@ export function TimeChart({
             </clipPath>
           </defs>
           <g clipPath={`url(#${cid})`}>
+            {/* 全丢的桶：一整列淡红竖条（Smokeping 那种），垫在最底下，不挡线与烟。 */}
+            {series.map((s) =>
+              (geometry.paths.get(s.key)?.columns ?? []).map((c) => (
+                <rect key={`z${s.key}${c.ts}`} x={c.x} y={TOP} width={c.w} height={plotH} fill="var(--destructive)" fillOpacity={0.14} />
+              )),
+            )}
             {series.map((s) =>
               s.band
-                ? (geometry.get(s.key)?.bands ?? []).map((d, i) => <path key={`b${s.key}${i}`} d={d} fill={s.color} fillOpacity={0.16} stroke="none" />)
+                ? (geometry.paths.get(s.key)?.bands ?? []).map((d, i) => <path key={`b${s.key}${i}`} d={d} fill={s.color} fillOpacity={0.16} stroke="none" />)
                 : null,
             )}
             {series.map((s) =>
               s.area ? (
-                (geometry.get(s.key)?.areas ?? []).map((d, i) => <path key={`a${s.key}${i}`} d={d} fill={s.color} fillOpacity={0.15} stroke="none" />)
+                (geometry.paths.get(s.key)?.areas ?? []).map((d, i) => <path key={`a${s.key}${i}`} d={d} fill={s.color} fillOpacity={0.15} stroke="none" />)
               ) : null,
             )}
             {/* 线：band 那一列没有线（它的值是 [低, 高]，画成一块区间），别给它生成空路径。 */}
             {series.filter((s) => !s.band).map((s) => (
               <path
                 key={`l${s.key}`}
-                d={geometry.get(s.key)?.line ?? ""}
+                d={geometry.paths.get(s.key)?.line ?? ""}
                 fill="none"
                 stroke={s.color}
                 strokeWidth={1.5}
@@ -502,6 +658,20 @@ export function TimeChart({
                 strokeLinecap="round"
               />
             ))}
+            {/* Smokeping 式折线：一档丢包颜色一条 path。 */}
+            {series.map((s) =>
+              (geometry.paths.get(s.key)?.segs ?? []).map((seg) => (
+                <path
+                  key={`q${s.key}${seg.color}`}
+                  d={seg.d}
+                  fill="none"
+                  stroke={seg.color}
+                  strokeWidth={2}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              )),
+            )}
           </g>
           {/* 悬停竖线（原来 `CURSOR` 那枚）。 */}
           {hovered && (

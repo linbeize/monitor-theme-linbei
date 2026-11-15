@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 
-import { TimeChart, type ChartSeries } from "@/components/Chart"
+import { LOSS_SCALE, TimeChart, type ChartSeries } from "@/components/Chart"
 import { PingTooltip } from "@/components/ChartTooltip"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -394,13 +394,21 @@ export function NodeDetail({ node, historyDays }: {
   // ★延迟图的 series 数组也要稳定（2026-11-09）：TimeChart 的路径缓存以 series 的**身份**为
   //   依赖，这个数组原来在 JSX 里现建 —— 悬停一次鼠标就换一次身份，缓存等于没有（而延迟图
   //   恰恰是唯一支持滚轮缩放、hover 最频繁的那张）。输入只有「可见探测 / 削峰 / 调色板」。
+  /**
+   * 屏上只剩一条线路时走 **Smokeping 画法**：灰色的「烟」是这一桶延迟的区间，中位线按丢包率分段
+   * 换色（绿＝不丢 → 青 → 蓝 → 紫 → 红），全丢的桶是一整列淡红竖条。几条线路叠在一起时颜色
+   * 得留给「哪条线路」，所以多线路时不画丢包（图例上那枚「丢 N%」与悬停提示照旧）。
+   */
+  const smokeping = shownProbes.length === 1
   const latencySeries = useMemo<ChartSeries[]>(() => {
     const band: ChartSeries[] = shownProbes.length === 1
       ? shownProbes.map((s) => ({
           key: `${smooth ? "c" : "b"}${s.id}`,
           name: s.name,
-          color: shadeOf(pingSeries, s.id).stroke,
+          // 烟是中性灰（Smokeping 原样）：颜色留给中位线上的丢包档。
+          color: "var(--muted-foreground)",
           band: true,
+          bridge: 2,
         }))
       : []
     return [
@@ -411,6 +419,9 @@ export function NodeDetail({ node, historyDays }: {
         name: s.name,
         color: shadeOf(pingSeries, s.id).stroke,
         dash: shadeOf(pingSeries, s.id).dash,
+        // 一两个包没回来不断线（单看时丢包另有颜色标出来）；连着 3 个以上才断开，那是真断了一阵。
+        bridge: 2,
+        lossKey: shownProbes.length === 1 ? `l${s.id}` : undefined,
       })),
     ]
   }, [shownProbes, smooth, pingSeries])
@@ -642,6 +653,9 @@ export function NodeDetail({ node, historyDays }: {
                     onClick={() =>
                       setHiddenProbes((h) => (shown ? [...h, s.id] : h.filter((id) => id !== s.id)))
                     }
+                    // 双击＝只看这一条（进 Smokeping 画法）；它前面那两次单击一显一隐正好抵消。
+                    onDoubleClick={() => setHiddenProbes(pingSeries.filter((p) => p.id !== s.id).map((p) => p.id))}
+                    title="单击显示/隐藏，双击只看这一条"
                     className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-opacity ${
                       shown ? "" : "opacity-40"
                     }`}
@@ -669,7 +683,26 @@ export function NodeDetail({ node, historyDays }: {
                   </button>
                 )
               })}
+              {pingSeries.length > 1 && !smokeping && (
+                <span className="px-1 text-xs text-muted-foreground">双击线路单看延迟与丢包</span>
+              )}
             </div>
+            )}
+            {/* Smokeping 视图的丢包图例：中位线的颜色就是这一段的丢包档。 */}
+            {smokeping && (
+              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>丢包</span>
+                {LOSS_SCALE.map((b) => (
+                  <span key={b.label} className="inline-flex items-center gap-1">
+                    <span className="inline-block h-1 w-3 rounded-sm" style={{ background: b.color }} aria-hidden />
+                    {b.label}
+                  </span>
+                ))}
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-2.5 w-2 rounded-sm bg-destructive/20" aria-hidden />
+                  全丢的时段
+                </span>
+              </div>
             )}
             </div>
             </Panel>

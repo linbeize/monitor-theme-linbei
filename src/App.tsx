@@ -23,7 +23,7 @@ const TITLE_CACHE_KEY = "kanso:site_name"
 
 // 页脚署名（右下角那行）里指向的源码仓库 —— 与 theme.json 的 `url` 是同一个地址
 // （面板卡片上的「源码」也指这里）。三处一起改（这里 / theme.json / tools/verify_footer_credit.mjs）。
-const REPO_URL = "https://github.com/akanotanin/monitor-theme-kanso"
+const REPO_URL = "https://github.com/linbeize/monitor-theme-linbei"
 
 // Split out because the list page draws no chart: the detail view (with its own
 // hand-drawn charts) travels as its own chunk — 17.8 kB raw / 6.9 kB gzipped as
@@ -468,7 +468,7 @@ export default function App() {
           —— 为手机改的东西不落到电脑端，桌面维持原样。
           （2026-10-12：站上短暂加过一枚「更新于 N 秒前」的数据年龄行，当天按站长要求撤掉 ——
            页脚回到这一行署名的最简形态。）
-          「Kanso」那截点开去本主题的源码仓库 —— 新标签页打开，别把访客从状态页带走
+          「Linbei」那截点开去本主题的源码仓库 —— 新标签页打开，别把访客从状态页带走
           （链接地址与 theme.json 的 url 是同一个，见上面的 REPO_URL）。
           样式见 index.css 的 .theme-credit。 */}
       <footer className="mx-auto mt-2 w-full max-w-[1080px] border-t px-4 pb-5 pt-4 sm:mt-0 sm:border-t-0 sm:px-6 sm:pb-5 sm:pt-1">
@@ -476,7 +476,7 @@ export default function App() {
           Theme:{" "}
           {/* ★REPO_URL 是常量（非空），原来那个三元里的 else 分支永远走不到 —— 2026-10-18 删。 */}
           <a href={REPO_URL} target="_blank" rel="noreferrer">
-            Kanso
+            Linbei
           </a>
         </p>
       </footer>
