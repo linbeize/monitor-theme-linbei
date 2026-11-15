@@ -1,4 +1,4 @@
-// 页脚署名的验收：右下角那行「Theme: Kanso」在不在、位置对不对、够不够「浅」。
+// 页脚署名的验收：右下角那行「Theme: Linbei」在不在、位置对不对、够不够「浅」。
 //
 // 用法：node tools/verify_footer_credit.mjs [baseUrl]
 //   不给 baseUrl：本机起静态服务器伺服 dist/ + 桩 /api/*（不经隧道，判据只由代码决定）。
@@ -9,7 +9,7 @@
 //   FOOTER_WAIT_MS    每一步等页面安静的时长（默认 2500，经隧道打真站时给大些）。
 //
 // 判据都是「形状」而不是具体色值：
-//   ① 署名在、文案逐字、链接指向源码仓库（新标签页 + noreferrer、锚文本是「Kanso」）；
+//   ① 署名在、文案逐字、链接指向源码仓库（新标签页 + noreferrer、锚文本是「Linbei」）；
 //   ② 位置：贴着主内容的右沿、排在正文之后 —— 内容比一屏短时整个署名落在视口右下角；
 //   ③ 「浅」用对比度说话：把颜色按 opacity 合成到页面底色上量 WCAG 对比度，
 //      必须低于顶栏站名（= 比正文浅），但仍 ≥ 1.6（看得见，不是隐形字）；
@@ -26,7 +26,7 @@ const REAL = !!process.argv[2]
 const SETTLE = Number(process.env.FOOTER_WAIT_MS || 2500)
 const SHOT_DIR = process.env.SHOT_DIR || ''
 // 与 App.tsx 的 REPO_URL / theme.json 的 url 同一个地址（三处必须一致，改时一起改）。
-const REPO_URL = 'https://github.com/akanotanin/monitor-theme-kanso'
+const REPO_URL = 'https://github.com/linbeize/monitor-theme-linbei'
 // 夹具配置钉死（理由见技能第 44 条：让判据只由代码决定，不取自那台 hub 上存的配置）。
 const CONFIG = {}
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webp': 'image/webp', '.woff2': 'font/woff2' }
@@ -209,9 +209,9 @@ const goto = async (path, { w, h, dark, mobile = false }) => {
 const common = (m, where) => {
   check(`${where}：右下角那行署名在`, m.exists && !!m.credit && m.credit.display !== 'none' && m.credit.visibility === 'visible' && m.credit.rect.h > 0,
     m.credit ? `${m.credit.rect.w}×${m.credit.rect.h} @ ${m.credit.rect.x},${m.credit.rect.y}` : '找不到 .theme-credit')
-  check(`${where}：文案逐字是「Theme: Kanso」`, m.text === 'Theme: Kanso', `实际=${JSON.stringify(m.text)}`)
-  check(`${where}：链接指向源码仓库、新标签页、锚文本是「Kanso」`,
-    m.href === REPO_URL && m.target === '_blank' && (m.rel || '').includes('noreferrer') && m.linkText === 'Kanso' && m.linkInside,
+  check(`${where}：文案逐字是「Theme: Linbei」`, m.text === 'Theme: Linbei', `实际=${JSON.stringify(m.text)}`)
+  check(`${where}：链接指向源码仓库、新标签页、锚文本是「Linbei」`,
+    m.href === REPO_URL && m.target === '_blank' && (m.rel || '').includes('noreferrer') && m.linkText === 'Linbei' && m.linkInside,
     `href=${m.href} target=${m.target} rel=${m.rel} 锚文本=${JSON.stringify(m.linkText)}`)
   // 对齐：桌面（≥640px）右对齐到主内容右沿；窄屏**居中** —— 2026-10-07 站长说手机上看
   // 右下角那行「位置不好看」（一行孤零零的灰字、左边整片空着，像水印），改成居中之后才像页脚。

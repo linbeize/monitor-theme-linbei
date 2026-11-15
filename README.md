@@ -1,6 +1,10 @@
-# kanso
+# linbei
 
-![kanso](preview.png?v=9)
+![linbei](preview.png?v=9)
+
+fork 自 [akanotanin/monitor-theme-kanso](https://github.com/akanotanin/monitor-theme-kanso)（kanso 1.9.2），在它的基础上改了延迟图：
+多条线路时偶发丢包不再把线截断；双击图例只看一条线路时按 Smokeping 方式画——灰色「烟」是延迟区间，
+中位线按丢包率分段着色（绿 → 青 → 蓝 → 紫 → 红），全丢的时段是一整列淡红竖条。
 
 极简探针（[Monitor](https://github.com/monitor-probe/monitor)）的第三方主题，源码基于上游默认主题
 `monitor-theme-default` v1.1.0 改造。纯静态前端，只读 hub 的公开接口，
