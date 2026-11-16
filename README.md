@@ -1,6 +1,6 @@
 # linbei
 
-![linbei](preview.png?v=9)
+![linbei](preview.png?v=20)
 
 fork 自 [akanotanin/monitor-theme-kanso](https://github.com/akanotanin/monitor-theme-kanso)（kanso 1.9.2），在它的基础上改了延迟图：
 多条线路时偶发丢包不再把线截断；双击图例只看一条线路时按 Smokeping 方式画——灰色「烟」是延迟区间，
@@ -16,9 +16,11 @@ fork 自 [akanotanin/monitor-theme-kanso](https://github.com/akanotanin/monitor-
 
 ## 预览
 
-| 亮色 | 暗色 | 手机 |
-|:---:|:---:|:---:|
-| ![预览](preview-light.png?v=15) | ![暗色](preview-dark.png?v=15) | ![手机](preview-mobile.png?v=15) |
+| 首页 | 暗色 | 详情页（单看一条线路） | 手机 |
+|:---:|:---:|:---:|:---:|
+| ![首页](preview-light.png?v=20) | ![暗色](preview-dark.png?v=20) | ![详情](preview-detail.png?v=20) | ![手机](preview-mobile.png?v=20) |
+
+截图取自作者自己的探针 [tz.linbei.de](https://tz.linbei.de)。
 
 
 ## 关于备注
