@@ -7,6 +7,7 @@ import { Meter } from "@/components/Meter"
 import type { Node } from "@/lib/api"
 import { CYCLE_SHORT, FOREVER, bytes, daysUntil, money, osName, pair, percent, rate, uptime } from "@/lib/format"
 import { remarkChips, type RemarkChip } from "@/lib/notes"
+import { EXPIRING_DAYS, URGENT_DAYS } from "@/lib/overview"
 
 /**
  * This period's usage as the plan meters it. The hub computes it; the switch
@@ -136,7 +137,7 @@ function rateParts(n: number): [string, string] {
  * · 到期优先用 hub 算好的 `expires_in`（按 hub 的时区算、在线机器还会顺延），只有旧 hub 没这个
  *   key 时才退回按 `expires_at` 自己数（见 @/lib/format 的 daysUntil）。
  */
-function noteText(node: Node): string {
+function noteText(node: Node): { price: string; left: string; days: number | null } {
   // ★`CYCLE_SHORT` 是普通对象：`billing_cycle = "constructor"` 会取到 Object 构造函数，
   //   模板字符串把函数源码印到卡片上。`Object.hasOwn` 是零成本的闸（2026-10-20 审出）。
   const cycle = Object.hasOwn(CYCLE_SHORT, node.billing_cycle) ? CYCLE_SHORT[node.billing_cycle] : ""
@@ -148,7 +149,19 @@ function noteText(node: Node): string {
   const days = node.expires_in !== undefined ? node.expires_in : daysUntil(node.expires_at)
   const left = days === null || days === undefined ? ""
     : days < 0 ? `已过期 ${-days} 天` : days === 0 ? "今天到期" : `剩余 ${days} 天`
-  return [price, left].filter(Boolean).join(" · ")
+  return { price, left, days: typeof days === "number" ? days : null }
+}
+
+/**
+ * 剩余天数的颜色（1.12.0）：≤7 天或已过期红、≤30 天黄，其余照旧灰 ——
+ * 原来「剩余 13 天」与「剩余 294 天」是同一种灰字，要一张张读才找得到快到期的那几台。
+ * 两条线与首页「即将到期」的筛选同源（@/lib/overview）。
+ */
+function expiryTone(days: number | null): string {
+  if (days === null) return ""
+  if (days <= URGENT_DAYS) return "font-medium text-destructive"
+  if (days <= EXPIRING_DAYS) return "font-medium text-[oklch(0.62_0.16_60)]"
+  return ""
 }
 
 /**
@@ -448,7 +461,11 @@ export function NodeCard({ node, onOpen, onWarm }: {
               —— 2026-10-15 站长要求「无备注 / 有备注两种情况下卡片大小相同」。
               小卡片也收成紧凑档（15px），塞得进这 16px，不再把整卡撑高 6px。 */}
           <div className="mt-2 flex h-4 min-w-0 items-center justify-between gap-2 overflow-hidden">
-            <span className="tnum min-w-0 truncate text-[11px] leading-4 text-muted-foreground">{note}</span>
+            <span className="tnum min-w-0 truncate text-[11px] leading-4 text-muted-foreground">
+              {note.price}
+              {note.price && note.left ? " · " : ""}
+              {note.left && <span className={expiryTone(note.days)}>{note.left}</span>}
+            </span>
             <span data-remark="card" className="flex min-w-0 max-w-[62%] shrink items-center justify-end gap-1 overflow-hidden">
               <RemarkChips chips={chips} />
             </span>
