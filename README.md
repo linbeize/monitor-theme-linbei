@@ -54,3 +54,8 @@ fork 自 [akanotanin/monitor-theme-kanso](https://github.com/akanotanin/monitor-
 MIT（上游 `monitor-theme-default` 的版权与许可照留，见 `LICENSE`）
 
 随包的 Inter 字体（`public/fonts/`）按 **OFL 1.1** 授权，许可见 `public/fonts/INTER-LICENSE.txt`。
+
+## 发版
+
+在 PR 里把 `theme.json` 与 `package.json` 的 `version` 一起改成新版本号，合并到 master 后
+GitHub Actions 会自动打同名 tag、打包并发布 Release（见 `.github/workflows/release.yml`）。

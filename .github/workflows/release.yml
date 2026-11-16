@@ -1,16 +1,26 @@
 name: Package theme
 
+# 自动发布：master 上 theme.json 的版本号变了（而且这个版本还没有 Release），就在这次提交上
+# 打同名 tag、打包、发 Release —— 发版只需要在 PR 里把 theme.json / package.json 的 version
+# 一起改掉、合并即可。手动推 x.x.x 的 tag 也照旧能发（补发 / 重发用）；Actions 页里也能手动触发。
+#
+# 用 GITHUB_TOKEN 建出来的 tag 不会再触发本工作流（GitHub 的防递归规则），所以不会发两次。
 on:
   push:
-    tags:
-      - '*'
+    branches: [master]
+    paths: [theme.json]
+    tags: ['*']
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
-    if: ${{ github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -20,28 +30,45 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: 校验 tag 与版本号
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag 必须是 x.x.x 形式：$TAG" >&2
-            exit 1
-          fi
-          node -e '
-            const fs = require("node:fs");
-            const tag = process.env.TAG;
-            for (const file of ["theme.json", "package.json"]) {
-              const version = JSON.parse(fs.readFileSync(file, "utf8")).version;
-              if (version !== tag) throw new Error(`${file} 的版本 ${version} 与 tag ${tag} 不一致`);
-            }
-          '
-      - run: npm ci
-      # package 自己会先 build，再校验 dist/ 是否比源码新，最后打 theme.tar.gz 并开包核对
-      - name: 构建并打包
-        run: npm run package
-      - name: 发布 Release
+      - name: 定版本号、判断要不要发
+        id: version
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" release/theme.tar.gz release/*.sha256 --verify-tag --title "$TAG" --generate-notes
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p 'require("./theme.json").version')
+          PKG=$(node -p 'require("./package.json").version')
+          if [[ "$REF_TYPE" == "tag" && "$REF_NAME" != "$VERSION" ]]; then
+            echo "tag $REF_NAME 与 theme.json 的版本 $VERSION 不一致" >&2; exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "版本号必须是 x.x.x 形式：$VERSION" >&2; exit 1
+          fi
+          if [[ "$PKG" != "$VERSION" ]]; then
+            echo "package.json 的版本 $PKG 与 theme.json 的 $VERSION 不一致" >&2; exit 1
+          fi
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION 已经存在，跳过"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - if: steps.version.outputs.skip == 'false'
+        run: npm ci
+      - if: steps.version.outputs.skip == 'false'
+        run: npm run lint && npm test
+      # package 自己会先 build，再校验 dist/ 是否比源码新，最后打 theme.tar.gz 并开包核对
+      - name: 构建并打包
+        if: steps.version.outputs.skip == 'false'
+        run: npm run package
+      - name: 发布 Release（tag 不存在时在这次提交上新建）
+        if: steps.version.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$VERSION" release/theme.tar.gz release/*.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$VERSION" --generate-notes
