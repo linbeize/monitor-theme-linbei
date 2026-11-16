@@ -34,6 +34,8 @@ const REPO_URL = "https://github.com/linbeize/monitor-theme-linbei"
 // warmDetail：列表画完之后空闲时取、指针落到卡片上时立刻取、开页就在详情页时立刻取。
 const loadDetail = () => import("@/components/NodeDetail").then((m) => ({ default: m.NodeDetail }))
 const NodeDetail = lazy(loadDetail)
+// 延迟对比页（1.13.0）也按需取：它要用到详情页那块的丢包配色，跟着一起拆出去，不进首屏包。
+const ComparePage = lazy(() => import("@/components/ComparePage").then((m) => ({ default: m.ComparePage })))
 
 /**
  * 详情页的骨架：按详情页真实的那几块摆（标题行 + 规格格 + 页签行 + 五张图），
@@ -109,12 +111,16 @@ function DetailSkeleton({ hasConnections = false }: { hasConnections?: boolean }
 //
 // ★（2026-10-16）搜索整个删掉后，地址栏只剩两个地址：列表是 `/`、详情是 `/node/{id}`。
 //   没有别的状态要复原，「后退 / 前进」就只是把 id 从路径里读回来。
+/** 列表 = null；详情 = 节点 id；`/compare` = 延迟对比页（1.13.0）。 */
+type Route = number | "compare" | null
+
 function useNodeRoute() {
-  const read = () => {
+  const read = (): Route => {
+    if (location.pathname === "/compare") return "compare"
     const match = location.pathname.match(/^\/node\/(\d+)/)
     return match ? Number(match[1]) : null
   }
-  const [id, setId] = useState(read)
+  const [id, setId] = useState<Route>(read)
   useEffect(() => {
     const sync = () => setId(read())
     addEventListener("popstate", sync)
@@ -122,8 +128,8 @@ function useNodeRoute() {
   }, [])
   return [
     id,
-    (next: number | null) => {
-      const target = next === null ? "/" : `/node/${next}`
+    (next: Route) => {
+      const target = next === null ? "/" : next === "compare" ? "/compare" : `/node/${next}`
       // ★同址不 push（2026-10-15 审出来）：站名按钮在列表页点一下也会 push 一条与当前逐字相同的
       //   记录，之后「后退」第一次看着像没反应（URL 没变、页面没动）。相同就只回到顶部。
       // ★（2026-10-16 审出）判据只看 pathname、不看查询串：搜索删掉后列表地址可能残留 `?q=…`
@@ -233,7 +239,10 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null)
   const [meError, setMeError] = useState("")
   const { nodes, error, closed } = useNodes()
-  const [open, go] = useNodeRoute()
+  const [route, go] = useNodeRoute()
+  /** 打开着的那台（详情页）；对比页与列表页都是 null。 */
+  const open = typeof route === "number" ? route : null
+  const comparing = route === "compare"
 
   const loadMe = useCallback(() => {
     // `|| "..."`: 空消息读起来像「没有错误」—— api() 现在会给 HTTP 状态兜一句中文，
@@ -326,10 +335,10 @@ export default function App() {
   const [filter, setFilter] = useState<ListFilter>(() => readFilter(location.search))
   const filtered = useMemo(() => applyFilter(sorted, filter), [sorted, filter])
   useEffect(() => {
-    if (open !== null) return
+    if (route !== null) return
     const target = "/" + writeFilter(filter)
     if (location.pathname + location.search !== target) history.replaceState({}, "", target)
-  }, [filter, open])
+  }, [filter, route])
 
   /** 进详情 / 回列表。 */
   const openNode = (id: number) => go(id)
@@ -456,6 +465,15 @@ export default function App() {
               节点不存在或未公开。<button className="underline" onClick={openList}>返回列表</button>
             </p>
           )
+        ) : comparing && nodes ? (
+          <Suspense fallback={<Skeleton className="h-96 w-full rounded-2xl" />}>
+            <ComparePage
+              nodes={sorted}
+              // 从对比页点进去，落在「网络延迟」页签（详情页挂载时读 ?tab=）：先 push 路径，再补查询串。
+              onOpen={(id) => { go(id); history.replaceState({}, "", `/node/${id}?tab=latency`) }}
+              onBack={openList}
+            />
+          </Suspense>
         ) : !nodes ? (
           // 还在等节点列表：骨架与卡片网格同一版式。
           // 高度跟着卡片来 —— 2026-10-20 卡片改成「三格读数（CPU / 内存 / 存储）+ 第四格两行速率」、
@@ -469,7 +487,7 @@ export default function App() {
         ) : (
           <>
             {sorted.length > 0 && (
-              <Overview nodes={sorted} filter={filter} onChange={setFilter} shown={filtered.length} />
+              <Overview nodes={sorted} filter={filter} onChange={setFilter} shown={filtered.length} onCompare={() => go("compare")} />
             )}
             <NodeList
               nodes={filtered}

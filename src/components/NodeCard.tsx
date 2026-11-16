@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Lock } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
-import { Meter } from "@/components/Meter"
+import { Meter, usageColor } from "@/components/Meter"
 import type { Node } from "@/lib/api"
 import { CYCLE_SHORT, FOREVER, bytes, daysUntil, money, osName, pair, percent, rate, uptime } from "@/lib/format"
 import { remarkChips, type RemarkChip } from "@/lib/notes"
@@ -450,8 +450,12 @@ export function NodeCard({ node, onOpen, onWarm }: {
           </div>
           <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-ok transition-[width] duration-500"
-              style={{ width: `${node.traffic_limit > 0 ? percent(monthUsage(node), node.traffic_limit) : 0}%` }}
+              className="h-full rounded-full transition-[width] duration-500"
+              // 流量条与读数条同一套变色（≥75% 黄、≥90% 红）：快超额的机器在列表里就看得出来。
+              style={(() => {
+                const pct = node.traffic_limit > 0 ? percent(monthUsage(node), node.traffic_limit) : 0
+                return { width: `${pct}%`, background: usageColor(pct) }
+              })()}
             />
           </div>
 
