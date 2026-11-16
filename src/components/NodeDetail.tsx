@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Country, deployed, offlineSeconds } from "@/components/NodeCard"
 import { api, type Node } from "@/lib/api"
 import {
-  axisBytes, axisTop, bytes, despike, cpuName, osName, rate, uptime,
+  axisBytes, axisTop, bytes, despike, cpuName, osName, pair, percent, rate, uptime,
 } from "@/lib/format"
 import { ms, pingStats } from "@/lib/pingstats"
 import { rangesFor } from "@/lib/ranges"
@@ -203,19 +203,57 @@ function cpuLine(node: Node): string {
   return name || (cores > 0 ? `${cores} 核` : "")
 }
 
+/** 用量条的颜色：≥90% 红、≥75% 黄，其余是卡片上那支绿。 */
+function barColor(pct: number): string {
+  return pct >= 90 ? "var(--destructive)" : pct >= 75 ? "oklch(0.75 0.16 75)" : "var(--ok)"
+}
+
 /**
- * 一格信息项。`title` 只在需要比显示值更多的说明时传（例如「负载」那一格的三条均值）；
- * 不传就退回值本身 —— 值都被 `truncate` 截断了（手机上 CPU 型号 / 内核名最先被截），
- * 悬停至少要能看到全文。
+ * 详情页头部的一格实时读数：表名、读数（加粗）、一行灰字补充，可选一根用量条。
+ * `pct` 不传 = 这格没有条（网速、流量、连接）；传 null = 有条但不知道用量（轨道留空）。
  */
-function Fact({ label, value, title }: { label: string; value?: string | number | null; title?: string }) {
-  if (value === null || value === undefined || value === "") return null
+function Stat({ label, value, sub, pct, title }: {
+  label: string
+  value: string
+  sub?: string
+  pct?: number | null
+  title?: string
+}) {
   return (
-    <div className="min-w-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="truncate text-sm" title={title ?? (typeof value === "string" ? value : undefined)}>{value}</dd>
+    <div className="min-w-0 rounded-xl border bg-card px-3 py-2.5" title={title}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="tnum mt-0.5 truncate text-[15px] font-semibold leading-5">{value}</div>
+      {sub ? <div className="tnum truncate text-xs text-muted-foreground" title={sub}>{sub}</div> : <div className="h-4" />}
+      {pct !== undefined && (
+        <div className="mt-1.5 h-[3px] w-full overflow-hidden rounded-full bg-muted">
+          {pct !== null && (
+            <div
+              className="h-full rounded-full transition-[width] duration-500"
+              style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: barColor(pct) }}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
+}
+
+/** 名字后面那枚状态：在线（绿点 + 在线时长）/ 离线（灰点 + 离线多久）/ 未接入。 */
+function StatusPill({ node }: { node: Node }) {
+  const on = node.online
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+      <span className={`size-1.5 rounded-full ${on ? "bg-ok" : "bg-muted-foreground/50"}`} aria-hidden />
+      {on ? (node.metrics ? `在线 ${uptime(node.metrics.uptime)}` : "在线") : onlineFor(node)}
+    </span>
+  )
+}
+
+/** 规格一行：系统 · 内核 · 架构 · 虚拟化 · CPU 型号 × 核数（缺的项直接跳过）。 */
+function specLine(node: Node): string {
+  return [osName(node.os), node.kernel, node.arch, node.virt !== "none" ? node.virt : "", cpuLine(node)]
+    .filter(Boolean)
+    .join(" · ")
 }
 
 export function NodeDetail({ node, historyDays }: {
@@ -493,61 +531,58 @@ export function NodeDetail({ node, historyDays }: {
 
   return (
     <div className="space-y-4">
-      {/* 旗子在前、名字在后，与卡片上的次序一致。状态徽章与 agent 版本不在这行：
-          在线时长已经并进下面的信息项，agent 版本对访客没有意义。
-          ★名字后那枚「复制机器名」2026-10-15 按站长要求去掉（连同剪贴板那段逻辑一起）：
-            详情页标题行只留旗子与名字。 */}
-      <div className="flex items-center gap-2">
-        <Country node={node} />
-        <h2 className="truncate text-lg font-semibold tracking-tight">{node.name}</h2>
+      {/* ★1.11.0 详情页头部重排：原来九格一样大小的灰字，规格（系统 / 架构 / 容量）与实时读数
+          （负载 / 连接 / 流量）混在一起，内存与硬盘只写总量、看不出用了多少。现在分三层：
+            ① 标题行：旗子 + 名字 + 在线状态（在线时长 / 离线多久）；
+            ② 一行灰字的规格：系统 · 内核 · 架构 · 虚拟化 · CPU 型号 × 核数；
+            ③ 实时读数格：CPU / 内存 / 硬盘带用量条（≥75% 转黄、≥90% 转红），网速、今日流量、
+               连接与进程各一格，随 WS 每两秒刷新。离线（metrics 为 null）时这一层不画。 */}
+      <div className="space-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <Country node={node} />
+          <h2 className="truncate text-lg font-semibold tracking-tight">{node.name}</h2>
+          <StatusPill node={node} />
+        </div>
+        {specLine(node) && (
+          <p className="line-clamp-2 text-sm text-muted-foreground sm:line-clamp-1" title={specLine(node)}>{specLine(node)}</p>
+        )}
       </div>
 
-      {/* One flat row of facts: what is left after the traffic figures moved
-          out is one machine's spec sheet, and a box around a single topic is
-          just a box. Three across at lg, two at md, one on a phone -- a kernel
-          version or a CPU model needs about 270px to stay whole.
-          ★2026-10-16 站长定的次序：系统 → 架构 → TCP / UDP 连接打头（一台机器的「身份」），
-            再是 CPU / 内存 / 今日流量，在线时间收尾。
-          ★2026-10-20 站长改了三轮，最终九格三行：身份（系统 → 架构 → 负载）、
-            容量（CPU → 内存 / 交换分区 → 硬盘）、动态（TCP / UDP 连接 → 今日流量 → 在线时间）。
-            相较上一版：进程并回「架构」格（值里写「… · 75 进程」）、空出来的那一格放「负载」
-            （卡片上撤掉的负载在这一页留个位置，值是 1 分钟均值、三条均值在悬停里）；标签只留「系统」「架构」（内核版本与虚拟化类型本来就在值里、
-            用 · 分隔），「/」只留给真正并列的两项（内存 / 交换分区、TCP / UDP 连接）。 */}
-      <dl className="grid gap-x-6 gap-y-3 md:grid-cols-2 lg:grid-cols-3">
-        <Fact label="系统" value={[osName(node.os), node.kernel].filter(Boolean).join(" · ")} />
-        <Fact
-          label="架构"
-          value={[node.arch, node.virt !== "none" ? node.virt : "", m && typeof m.procs === "number" && m.procs > 0 ? `${m.procs} 进程` : ""]
-            .filter(Boolean)
-            .join(" · ")}
-        />
-        {/* ★2026-10-20 第三轮站长要求：进程并回「架构」格（1.7.3 的写法），空出来的这格放「负载」——
-            卡片上撤掉的负载在详情页留一个位置。值只看 1 分钟均值（与卡片同一口径），三条均值在悬停里。 */}
-        <Fact
-          label="负载"
-          value={m ? m.load[0].toFixed(2) : null}
-          title={m ? `1 / 5 / 15 分钟：${m.load.map((n) => n.toFixed(2)).join(" ")}` : undefined}
-        />
-        <Fact label="CPU" value={cpuLine(node)} />
-        {/* ★2026-10-20 站长要求：内存与交换分区合成一格（沿用旧「内存 / 硬盘」那格的写法），
-            硬盘各占一格。容量为 0（从未接入、或顶层缺失又没读数）= 整格隐身，
-            不摆一格「0 B / 0 B」；交换分区总量未知时写「—」（见上面 swapTotal）。 */}
-        <Fact
-          label="内存 / 交换分区"
-          value={memTotal > 0 ? `${bytes(memTotal)} / ${swapTotal === null ? "—" : bytes(swapTotal)}` : null}
-        />
-        <Fact label="硬盘" value={diskTotal > 0 ? bytes(diskTotal) : null} />
-        {/* 连接数：hub 的实时上报里带着 TCP / UDP 连接条数（`metrics.tcp / udp`）。
-            ★2026-10-15 站长要求合成**一格**、写法照「内存 / 硬盘」那格：标签 `TCP / UDP 连接`、
-            值 `17 / 3`。离线机器 `metrics` 是 null，这一格随 Fact 的既有口径一起隐身
-            ——「没有这个值」本来就不该占格子。 */}
-        {/* 连接数只在这一帧真的带着两个数时出现（老 hub / 形状漂移都是 null）。 */}
-        <Fact label="TCP / UDP 连接" value={m && m.tcp !== null && m.udp !== null ? `${m.tcp} / ${m.udp}` : null} />
-        <Fact label="今日流量" value={node.day_rx || node.day_tx || m ? `↓ ${bytes(node.day_rx)} · ↑ ${bytes(node.day_tx)}` : null} />
-        {/* 最后一格是「在线时间」：取代原先标题行上那枚状态徽章。它顶掉的是「续费」
-            那一格——公开页的访客关心这台机器还活着多久，价格与到期在后台看。 */}
-        <Fact label="在线时间" value={onlineFor(node)} />
-      </dl>
+      {m && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <Stat
+            label="CPU"
+            value={`${m.cpu.toFixed(1)}%`}
+            pct={m.cpu}
+            sub={[node.cpu_cores > 0 ? `${node.cpu_cores} 核` : "", `负载 ${m.load[0].toFixed(2)}`].filter(Boolean).join(" · ")}
+            title={`负载 1 / 5 / 15 分钟：${m.load.map((n) => n.toFixed(2)).join(" ")}`}
+          />
+          <Stat
+            label="内存"
+            value={memTotal > 0 ? `${percent(m.mem_used, memTotal).toFixed(0)}%` : "—"}
+            pct={memTotal > 0 ? percent(m.mem_used, memTotal) : null}
+            sub={memTotal > 0 ? pair(m.mem_used, memTotal) : ""}
+            title={swapTotal ? `交换分区 ${pair(m.swap_used ?? 0, swapTotal)}` : swapTotal === 0 ? "没有交换分区" : undefined}
+          />
+          <Stat
+            label="硬盘"
+            value={diskTotal > 0 ? `${percent(m.disk_used, diskTotal).toFixed(0)}%` : "—"}
+            pct={diskTotal > 0 ? percent(m.disk_used, diskTotal) : null}
+            sub={diskTotal > 0 ? pair(m.disk_used, diskTotal) : ""}
+          />
+          <Stat label="网速" value={`↓ ${rate(m.net_rx)}`} sub={`↑ ${rate(m.net_tx)}`} />
+          <Stat
+            label="今日流量"
+            value={bytes(node.day_rx + node.day_tx)}
+            sub={`↓ ${bytes(node.day_rx)} · ↑ ${bytes(node.day_tx)}`}
+          />
+          <Stat
+            label="TCP / UDP"
+            value={m.tcp !== null && m.udp !== null ? `${m.tcp} / ${m.udp}` : "—"}
+            sub={typeof m.procs === "number" && m.procs > 0 ? `${m.procs} 进程` : ""}
+          />
+        </div>
+      )}
 
       <div className="space-y-2 border-t border-border/70 pt-4">
         <div className="flex gap-1">
