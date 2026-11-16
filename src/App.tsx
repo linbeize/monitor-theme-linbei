@@ -2,10 +2,12 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useS
 import { Moon, Sun, Wrench } from "lucide-react"
 
 import { NodeCard } from "@/components/NodeCard"
+import { Overview } from "@/components/Overview"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, useNodes, type Node } from "@/lib/api"
 import { useLocalFarm } from "@/lib/farm-entry"
+import { applyFilter, readFilter, writeFilter, type ListFilter } from "@/lib/overview"
 import { FarmIcon } from "@/components/FarmIcon"
 
 type Me = {
@@ -319,6 +321,16 @@ export default function App() {
   }), [nodes])
   const selected = sorted.find((n) => n.id === open)
 
+  // 首页的搜索 / 筛选 / 排序（1.12.0，见 @/lib/overview）。状态挂在 App 上：点进详情再回来，
+  // 筛选还在；同时镜像进列表页的查询串（replace，不塞历史条目），刷新与分享链接都带着它。
+  const [filter, setFilter] = useState<ListFilter>(() => readFilter(location.search))
+  const filtered = useMemo(() => applyFilter(sorted, filter), [sorted, filter])
+  useEffect(() => {
+    if (open !== null) return
+    const target = "/" + writeFilter(filter)
+    if (location.pathname + location.search !== target) history.replaceState({}, "", target)
+  }, [filter, open])
+
   /** 进详情 / 回列表。 */
   const openNode = (id: number) => go(id)
   const openList = () => go(null)
@@ -455,7 +467,17 @@ export default function App() {
             ))}
           </div>
         ) : (
-          <NodeList nodes={sorted} onOpen={openNode} onWarm={warmDetail} />
+          <>
+            {sorted.length > 0 && (
+              <Overview nodes={sorted} filter={filter} onChange={setFilter} shown={filtered.length} />
+            )}
+            <NodeList
+              nodes={filtered}
+              onOpen={openNode}
+              onWarm={warmDetail}
+              empty={sorted.length === 0 ? "还没有节点" : "没有符合条件的节点"}
+            />
+          </>
         )}
       </main>
 
@@ -550,8 +572,10 @@ function useProgressive(total: number, first = 24, step = 12): number {
  * 卡片网格：把这批机器摊成「简约」卡片（本主题唯一一档），只管画。
  * （2026-10-16 搜索整个删掉后，这里不再有筛选、描色与键盘光标。）
  */
-function NodeList({ nodes, onOpen, onWarm }: {
+function NodeList({ nodes, onOpen, onWarm, empty }: {
   nodes: Node[]
+  /** 列表为空时的那句话（没有节点 / 筛完一台不剩是两回事）。 */
+  empty: string
   /** 进详情。 */
   onOpen: (id: number) => void
   /** 指针/键盘刚落到某一张卡片上：把详情那块 chunk 先取回来（见 App 的 warmDetail）。 */
@@ -563,7 +587,7 @@ function NodeList({ nodes, onOpen, onWarm }: {
   return (
     <>
       {nodes.length === 0 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">还没有节点</p>
+        <p className="py-16 text-center text-sm text-muted-foreground">{empty}</p>
       ) : (
         // ★2026-10-25：列数交给 `.card-grid`（auto-fit 324–400 + 居中）—— 断点按视口、版式按容器
         //   那一版在 1100–1279 上把每张卡摊到 510 宽、700 左右摊到 637 宽，读数区空成一片。
