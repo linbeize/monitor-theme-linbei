@@ -1,5 +1,13 @@
 import type { ReactNode } from "react"
 
+/**
+ * 用量条的颜色（1.13.0 起卡片与详情页共用）：≥90% 红、≥75% 黄，其余是那支绿。
+ * 原来卡片上的条永远是绿的 —— 硬盘用到 87% 和 7% 看着一样，只有详情页会变色。
+ */
+export function usageColor(pct: number): string {
+  return pct >= 90 ? "var(--destructive)" : pct >= 75 ? "oklch(0.75 0.16 75)" : "var(--ok)"
+}
+
 type Props = {
   label: string
   value: ReactNode
@@ -32,7 +40,7 @@ export function Meter({ label, value, pct, title }: Props) {
       <div className="truncate text-xs text-muted-foreground">{label}</div>
       <div className="tnum mt-0.5 truncate text-[13px] font-semibold leading-[18px]">{value}</div>
       <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-ok transition-[width] duration-500" style={{ width: `${filled}%` }} />
+        <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${filled}%`, background: usageColor(filled) }} />
       </div>
     </div>
   )

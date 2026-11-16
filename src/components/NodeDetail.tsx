@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 
+import { usageColor } from "@/components/Meter"
 import { LOSS_SCALE, lossColor, TimeChart, type ChartSeries } from "@/components/Chart"
 import { PingTooltip } from "@/components/ChartTooltip"
+import { LatencyHeatmap } from "@/components/LatencyHeatmap"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Country, deployed, offlineSeconds } from "@/components/NodeCard"
@@ -203,11 +205,6 @@ function cpuLine(node: Node): string {
   return name || (cores > 0 ? `${cores} 核` : "")
 }
 
-/** 用量条的颜色：≥90% 红、≥75% 黄，其余是卡片上那支绿。 */
-function barColor(pct: number): string {
-  return pct >= 90 ? "var(--destructive)" : pct >= 75 ? "oklch(0.75 0.16 75)" : "var(--ok)"
-}
-
 /**
  * 详情页头部的一格实时读数：表名、读数（加粗）、一行灰字补充，可选一根用量条。
  * `pct` 不传 = 这格没有条（网速、流量、连接）；传 null = 有条但不知道用量（轨道留空）。
@@ -229,7 +226,7 @@ function Stat({ label, value, sub, pct, title }: {
           {pct !== null && (
             <div
               className="h-full rounded-full transition-[width] duration-500"
-              style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: barColor(pct) }}
+              style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: usageColor(pct) }}
             />
           )}
         </div>
@@ -434,6 +431,12 @@ export function NodeDetail({ node, historyDays }: {
     () => pingSeries.filter((s) => !hiddenProbes.includes(s.id)),
     [pingSeries, hiddenProbes],
   )
+  // 热力图的输入：可见线路各自的逐桶数据（身份随 shownProbes 变，避免每帧重算网格）。
+  const heatSeries = useMemo(
+    () => shownProbes.map((s) => ({ id: s.id, name: s.name, color: shadeOf(pingSeries, s.id).stroke, points: s.points })),
+    [shownProbes, pingSeries],
+  )
+
   // Keyed on the full list, so a line keeps its shade when others are hidden.
   // ★`findIndex` 为 -1 时 `PALETTE[-1]` 是 undefined，`.stroke` 会当场抛（2026-11-09 补：
   //   目前 id 都来自 pingSeries，理论不可达，但这条兜底是零成本的 —— 越界就退回第一档）。
@@ -644,6 +647,7 @@ export function NodeDetail({ node, historyDays }: {
           // wrong on one of them.
           // 高度仍钉在**这一层**（`100svh - 顶 - 1rem`），白卡 `h-full` 填进来 —— 卡壳的 26px 在
           // 这一层之内，所以「一屏放得下、不滚动」的性质与从前完全一样（verify_detail_charts 断它）。
+          <>
           <div
             // 高度按这个盒子的**文档偏移**算（见下）。★量法从内联 ref 回调换成 useLayoutEffect
             //   （2026-11-09）：内联 ref 每次渲染都是新身份，React 每帧都要 detach/attach 一遍；
@@ -780,6 +784,10 @@ export function NodeDetail({ node, historyDays }: {
             </div>
             </Panel>
           </div>
+          {/* 热力图（1.13.0）：2~31 天的范围才有意义——1 天看不出「每天同一时段」，一年 365 行太长。
+              延迟面板本身仍钉满一屏，热力图在它下面，往下滚才看到。 */}
+          {hours >= 48 && hours <= 31 * 24 && heatSeries.length > 0 && <LatencyHeatmap series={heatSeries} />}
+          </>
         )
       ) : metricRows.length === 0 ? (
         <EmptyPanel>这段时间没有历史数据</EmptyPanel>

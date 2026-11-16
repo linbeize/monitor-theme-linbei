@@ -1,4 +1,4 @@
-import { Search, X } from "lucide-react"
+import { Activity, Search, X } from "lucide-react"
 
 import type { Node } from "@/lib/api"
 import { bytes, rate } from "@/lib/format"
@@ -12,12 +12,14 @@ import {
  *   ② 筛选栏：搜索框、状态、排序，下面一行地区（国旗 + 台数，点一下只看这个地区，再点取消）。
  * 筛选只是「看哪几张卡」，不改卡片本身；状态由 App 持有并同步进地址栏（见 @/lib/overview）。
  */
-export function Overview({ nodes, filter, onChange, shown }: {
+export function Overview({ nodes, filter, onChange, shown, onCompare }: {
   nodes: Node[]
   filter: ListFilter
   onChange: (next: ListFilter) => void
   /** 筛完还剩几台（与 nodes.length 不同时显示「N / 共 M 台」）。 */
   shown: number
+  /** 进延迟对比页。 */
+  onCompare: () => void
 }) {
   const s: Summary = summarize(nodes)
   const set = (patch: Partial<ListFilter>) => onChange({ ...filter, ...patch })
@@ -76,6 +78,13 @@ export function Overview({ nodes, filter, onChange, shown }: {
             <option key={o.key} value={o.key}>{o.label}</option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={onCompare}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-card px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Activity className="size-3.5" aria-hidden />延迟对比
+        </button>
       </div>
 
       {s.countries.length > 1 && (
