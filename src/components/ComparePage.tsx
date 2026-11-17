@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react"
 
 import { lossColor } from "@/components/Chart"
 import { Country, deployed } from "@/components/NodeCard"
-import { api, type Node } from "@/lib/api"
+import { api, ApiError, type Node } from "@/lib/api"
 import { cellsOf, columnRange, columnsOf, latencyTint, POINTS, sortByProbe, type NodePing } from "@/lib/compare"
 import { ms } from "@/lib/pingstats"
 
@@ -13,11 +13,44 @@ const RANGES = [
   { hours: 24, label: "24 小时" },
 ]
 
-/** 同时在途的请求数：36 台一起发会把 hub（以及前面的反代限并发）一下子打满。 */
-const PARALLEL = 6
-/** 结果缓存一分钟：从详情页点回来、或在三个范围之间来回切，不必重拉。 */
+/**
+ * 同时在途的请求数：**3**。hub 对历史查询有一道全站共用的闸（`HISTORY_SLOTS = 4`，api.rs），
+ * 满了不排队、直接答 503「查询历史的请求太多」。1.13.0 开 6 路时实测 36 台里每轮有 2 台被拒 ——
+ * 那几行就一直是「—」。留一个位子给同时在看详情页的其他访客。
+ */
+const PARALLEL = 3
+/** 被闸拒掉（503）或网络抖动时重试几次；退避 0.6s → 1.2s → 2.4s → 4.8s（再加点随机，免得几路一起撞回去）。 */
+const RETRIES = 4
+/** 结果缓存一分钟：从详情页点回来、或在三个范围之间来回切，不必重拉。**只缓存成功的**。 */
 const TTL = 60_000
-const cache = new Map<string, { at: number; data: NodePing | null }>()
+const cache = new Map<string, { at: number; data: NodePing }>()
+
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms)
+    signal.addEventListener("abort", () => { clearTimeout(t); resolve() }, { once: true })
+  })
+
+/** 值得再试一次的失败：hub 的闸（503）、反代的 502 / 504、超时与网络错误（status 0）。 */
+const transient = (e: unknown) => e instanceof ApiError && [0, 502, 503, 504].includes(e.status)
+
+async function load(id: number, hours: number, signal: AbortSignal): Promise<NodePing> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await api<NodePing>(
+        `/nodes/${id}/metrics?hours=${hours}&points=${POINTS[hours] ?? 60}&series=ping`,
+        { signal },
+        30_000,
+      )
+    } catch (e) {
+      if (signal.aborted || attempt >= RETRIES || !transient(e)) throw e
+      await sleep(600 * 2 ** attempt + Math.random() * 300, signal)
+    }
+  }
+}
+
+/** 一台的状态：拿到了 / 重试完仍失败（不进缓存，点「重试」再拉）。还在路上的不在 Map 里。 */
+type Got = NodePing | "failed"
 
 /**
  * 延迟对比页（`/compare`，1.13.0）：所有接入过的节点 × 每条探测线路的中位延迟与丢包。
@@ -31,16 +64,18 @@ export function ComparePage({ nodes, onOpen, onBack }: {
 }) {
   const [hours, setHours] = useState(1)
   const [by, setBy] = useState<number | null>(null)
+  const [attempt, setAttempt] = useState(0)
   const targets = useMemo(() => nodes.filter(deployed), [nodes])
-  // 依赖只看 id 串：nodes 每两秒换一次身份（实时帧），不能因此重拉。
-  const ids = targets.map((n) => n.id).join(",")
-  const [data, setData] = useState<Map<number, NodePing | null>>(new Map())
+  // 依赖只看**排好序的** id 串：nodes 每两秒换一次身份（实时帧），列表顺序也会因为某台
+  // 上下线而变 —— 两者都不该让进行中的请求被整批取消、从头再来（1.13.1）。
+  const ids = targets.map((n) => n.id).sort((x, y) => x - y).join(",")
+  const [data, setData] = useState<Map<number, Got>>(new Map())
 
   useEffect(() => {
     const control = new AbortController()
     const list = ids ? ids.split(",").map(Number) : []
     const now = Date.now()
-    const fresh = new Map<number, NodePing | null>()
+    const fresh = new Map<number, Got>()
     for (const id of list) {
       const hit = cache.get(`${id}:${hours}`)
       if (hit && now - hit.at < TTL) fresh.set(id, hit.data)
@@ -51,31 +86,34 @@ export function ComparePage({ nodes, onOpen, onBack }: {
     const worker = async () => {
       while (queue.length && !control.signal.aborted) {
         const id = queue.shift()!
-        let got: NodePing | null = null
+        let got: Got = "failed"
         try {
-          got = await api<NodePing>(
-            `/nodes/${id}/metrics?hours=${hours}&points=${POINTS[hours] ?? 60}&series=ping`,
-            { signal: control.signal },
-            30_000,
-          )
+          got = await load(id, hours, control.signal)
+          cache.set(`${id}:${hours}`, { at: Date.now(), data: got })
         } catch {
           if (control.signal.aborted) return
         }
-        cache.set(`${id}:${hours}`, { at: Date.now(), data: got })
         if (!control.signal.aborted) setData((prev) => new Map(prev).set(id, got))
       }
     }
     for (let i = 0; i < PARALLEL; i++) void worker()
     return () => control.abort()
-  }, [ids, hours])
+  }, [ids, hours, attempt])
 
-  const columns = useMemo(() => columnsOf([...data.values()].map((d) => d ?? undefined)), [data])
+  const ok = (d: Got | undefined) => (d && d !== "failed" ? d : undefined)
+  const columns = useMemo(() => columnsOf([...data.values()].map(ok)), [data])
   const rows = useMemo(
-    () => sortByProbe(targets.map((node) => ({ node, cells: cellsOf(data.get(node.id) ?? undefined), loaded: data.has(node.id) })), by),
+    () => sortByProbe(targets.map((node) => ({
+      node,
+      cells: cellsOf(ok(data.get(node.id))),
+      loaded: data.has(node.id),
+      failed: data.get(node.id) === "failed",
+    })), by),
     [targets, data, by],
   )
   const ranges = useMemo(() => new Map(columns.map((c) => [c.id, columnRange(rows, c.id)])), [columns, rows])
   const done = targets.filter((n) => data.has(n.id)).length
+  const failed = rows.filter((r) => r.failed).length
 
   return (
     <div className="space-y-4">
@@ -106,6 +144,15 @@ export function ComparePage({ nodes, onOpen, onBack }: {
         <span className="text-xs text-muted-foreground">
           {done < targets.length ? `加载中 ${done} / ${targets.length}` : `${targets.length} 台 · 中位延迟 ms · 点表头排序`}
         </span>
+        {failed > 0 && done === targets.length && (
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="rounded-full border px-2.5 py-0.5 text-xs text-destructive hover:bg-muted/40"
+          >
+            {failed} 台没拉到，重试
+          </button>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-2xl border bg-card shadow-lg shadow-border/60 dark:shadow-none">
@@ -132,7 +179,7 @@ export function ComparePage({ nodes, onOpen, onBack }: {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ node, cells, loaded }) => (
+            {rows.map(({ node, cells, loaded, failed: bad }) => (
               <tr
                 key={node.id}
                 onClick={() => onOpen(node.id)}
@@ -148,6 +195,7 @@ export function ComparePage({ nodes, onOpen, onBack }: {
                   const cell = cells.get(c.id)
                   const range = ranges.get(c.id)
                   if (!loaded) return <td key={c.id} className="text-right text-muted-foreground/50">…</td>
+                  if (bad) return <td key={c.id} className="text-right text-xs text-destructive/70" title="hub 忙或网络错误，点上面的「重试」">失败</td>
                   if (!cell) return <td key={c.id} className="text-right text-muted-foreground/50">—</td>
                   const best = cell.median !== null && range && cell.median === range[0]
                   return (
