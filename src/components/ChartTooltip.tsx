@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { t as tr } from "@/lib/i18n"
 
 /**
  * 图表 tooltip：本主题自己画的那一枚。
@@ -94,7 +95,7 @@ export function ChartTooltip({
         ))}
       </ul>
       {narrow && capNarrow && ordered.length > shown.length && (
-        <div className="mt-1 text-muted-foreground">另有 {ordered.length - shown.length} 条</div>
+        <div className="mt-1 text-muted-foreground">{tr(`另有 ${ordered.length - shown.length} 条`, `${ordered.length - shown.length} more`)}</div>
       )}
     </div>
   )
@@ -147,12 +148,12 @@ export function PingTooltip({
       // 注释原来写「排最后」，与代码相反；2026-10-15 审出来时确认按代码这一支走，注释改成实话。
       sortKey={(entry) => (entry.value == null ? Number.MAX_SAFE_INTEGER : Number(entry.value))}
       keepEmpty={(entry) => lossOf(entry) > 0}
-      emptyText="无响应"
+      emptyText={tr("无响应", "no reply")}
       trailing={(entry) => {
         const loss = lossOf(entry)
         // 与图例同一口径（NodeDetail 那边是「<1 就写 <1，其余四舍五入」）：这里原来直接印原始浮点，
         // 12 个样本丢 1 个就是「丢 8.333333333333332%」，11px 的小卡片被撑开（2026-10-15 审出来）。
-        return loss > 0 ? <span className="tnum pl-1 text-muted-foreground">丢 {loss < 1 ? "<1" : Math.round(loss)}%</span> : null
+        return loss > 0 ? <span className="tnum pl-1 text-muted-foreground">{tr("丢", "loss")} {loss < 1 ? "<1" : Math.round(loss)}%</span> : null
       }}
     />
   )

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 
 import { ChartTooltip } from "@/components/ChartTooltip"
 import { autoRange, clockFor, innerTicks, nearestIndexByTime, quarters, timeTicks, zoomSpan } from "@/lib/format"
+import { t as tr } from "@/lib/i18n"
 
 /**
  * 零依赖的时间序列图：替掉 recharts（它给详情页背了 384KB 原始 / 110KB gzip 的包，
@@ -46,14 +47,14 @@ export type ChartSeries = {
  * Smokeping 的丢包配色（默认 20 包那套：0 绿、1 青、2 蓝、3 靛、4~10 紫、10~19 品红、全丢红），
  * 换成百分比档。亮度压了一档，白卡上才看得清（原版那支 #26ff00 荧光绿在白底上几乎隐形）。
  */
-export const LOSS_SCALE: { max: number; color: string; label: string }[] = [
-  { max: 0, color: "#16a34a", label: "0" },
-  { max: 5, color: "#0ea5e9", label: "≤5%" },
-  { max: 10, color: "#2563eb", label: "≤10%" },
-  { max: 20, color: "#6d28d9", label: "≤20%" },
-  { max: 50, color: "#a21caf", label: "≤50%" },
-  { max: 99.999, color: "#db2777", label: "<100%" },
-  { max: Infinity, color: "#dc2626", label: "全丢" },
+export const LOSS_SCALE: { max: number; color: string; label: () => string }[] = [
+  { max: 0, color: "#16a34a", label: () => "0" },
+  { max: 5, color: "#0ea5e9", label: () => "≤5%" },
+  { max: 10, color: "#2563eb", label: () => "≤10%" },
+  { max: 20, color: "#6d28d9", label: () => "≤20%" },
+  { max: 50, color: "#a21caf", label: () => "≤50%" },
+  { max: 99.999, color: "#db2777", label: () => "<100%" },
+  { max: Infinity, color: "#dc2626", label: () => tr("全丢", "100%") },
 ]
 export const lossColor = (loss: number) => (LOSS_SCALE.find((b) => loss <= b.max) ?? LOSS_SCALE[LOSS_SCALE.length - 1]).color
 
@@ -324,7 +325,7 @@ export function TimeChart({
     // 用每张图自己的数值格式器，不用 Y 轴刻度格式器：刻度精度跟着网格步长走，
     // CPU 0.2–0.4% 会被 yLabel 印成「0% / 0%」（2026-10-20 复审出）。
     const fmt = format ?? ((value: number) => `${yLabel(value)}${unit}`)
-    return `可见区间最低 ${fmt(ext[0])}，最高 ${fmt(ext[1])}`
+    return tr(`可见区间最低 ${fmt(ext[0])}，最高 ${fmt(ext[1])}`, `Visible range: low ${fmt(ext[0])}, high ${fmt(ext[1])}`)
   })()
   const xTicks = view.length > 1 ? timeTicks(t0, t1).filter((t) => t >= t0 && t <= t1) : []
   // ★格式跟着**可见区间**走，不是整窗（2026-10-15 审出来）：刻度位置本来就是按 t0/t1 算的，
@@ -752,7 +753,7 @@ export function TimeChart({
           onClick={() => setYZoom(null)}
           className="tap tap-y-6 absolute top-0 right-1 rounded-md border bg-card px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
         >
-          重置
+          {tr("重置", "Reset")}
         </button>
       )}
       {hovered && (

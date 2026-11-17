@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client"
 
 import App from "./App.tsx"
 import "./index.css"
+import { t as tr } from "@/lib/i18n"
 
 /**
  * 最外层错误边界：一帧脏数据（hub 换了形状、某个字段缺失、某处拼装炸了）不该把整页变成白屏。
@@ -24,8 +25,8 @@ class Boundary extends Component<{ children: ReactNode }, { err: Error | null }>
     return (
       <div className="grid min-h-svh place-items-center p-6 text-sm text-muted-foreground">
         <div className="space-y-3 text-center">
-          <p role="alert">页面渲染出错：{this.state.err.message}</p>
-          <button className="underline" onClick={() => location.reload()}>重新加载</button>
+          <p role="alert">{tr("页面渲染出错：", "Page failed to render: ")}{this.state.err.message}</p>
+          <button className="underline" onClick={() => location.reload()}>{tr("重新加载", "Reload")}</button>
         </div>
       </div>
     )

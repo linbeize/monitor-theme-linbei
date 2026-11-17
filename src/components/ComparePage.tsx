@@ -6,12 +6,10 @@ import { Country, deployed } from "@/components/NodeCard"
 import { api, ApiError, type Node } from "@/lib/api"
 import { cellsOf, columnRange, columnsOf, latencyTint, POINTS, sortByProbe, type NodePing } from "@/lib/compare"
 import { ms } from "@/lib/pingstats"
+import { plural, t as tr } from "@/lib/i18n"
+import { rangeLabel } from "@/lib/ranges"
 
-const RANGES = [
-  { hours: 1, label: "1 小时" },
-  { hours: 6, label: "6 小时" },
-  { hours: 24, label: "24 小时" },
-]
+const RANGES = [1, 6, 24]
 
 /**
  * 同时在途的请求数：**3**。hub 对历史查询有一道全站共用的闸（`HISTORY_SLOTS = 4`，api.rs），
@@ -123,26 +121,28 @@ export function ComparePage({ nodes, onOpen, onBack }: {
           onClick={onBack}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="size-4" aria-hidden />返回
+          <ArrowLeft className="size-4" aria-hidden />{tr("返回", "Back")}
         </button>
-        <h2 className="text-lg font-semibold tracking-tight">延迟对比</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{tr("延迟对比", "Latency comparison")}</h2>
         <div className="flex gap-1">
-          {RANGES.map((r) => (
+          {RANGES.map((h) => (
             <button
-              key={r.hours}
+              key={h}
               type="button"
-              aria-pressed={hours === r.hours}
-              onClick={() => setHours(r.hours)}
+              aria-pressed={hours === h}
+              onClick={() => setHours(h)}
               className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
-                hours === r.hours ? "border bg-card font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+                hours === h ? "border bg-card font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {r.label}
+              {rangeLabel(h)}
             </button>
           ))}
         </div>
         <span className="text-xs text-muted-foreground">
-          {done < targets.length ? `加载中 ${done} / ${targets.length}` : `${targets.length} 台 · 中位延迟 ms · 点表头排序`}
+          {done < targets.length
+            ? tr(`加载中 ${done} / ${targets.length}`, `Loading ${done} / ${targets.length}`)
+            : tr(`${targets.length} 台 · 中位延迟 ms · 点表头排序`, `${plural(targets.length, "node")} · median latency in ms · click a header to sort`)}
         </span>
         {failed > 0 && done === targets.length && (
           <button
@@ -150,7 +150,7 @@ export function ComparePage({ nodes, onOpen, onBack }: {
             onClick={() => setAttempt((n) => n + 1)}
             className="rounded-full border px-2.5 py-0.5 text-xs text-destructive hover:bg-muted/40"
           >
-            {failed} 台没拉到，重试
+            {tr(`${failed} 台没拉到，重试`, `${failed} failed, retry`)}
           </button>
         )}
       </div>
@@ -161,7 +161,7 @@ export function ComparePage({ nodes, onOpen, onBack }: {
             <tr className="[&>th]:px-3 [&>th]:py-2.5 [&>th]:font-normal">
               <th className="sticky left-0 bg-card text-left">
                 <button type="button" onClick={() => setBy(null)} className={by === null ? "font-medium text-foreground" : "hover:text-foreground"}>
-                  节点
+                  {tr("节点", "Node")}
                 </button>
               </th>
               {columns.map((c) => (
@@ -195,7 +195,7 @@ export function ComparePage({ nodes, onOpen, onBack }: {
                   const cell = cells.get(c.id)
                   const range = ranges.get(c.id)
                   if (!loaded) return <td key={c.id} className="text-right text-muted-foreground/50">…</td>
-                  if (bad) return <td key={c.id} className="text-right text-xs text-destructive/70" title="hub 忙或网络错误，点上面的「重试」">失败</td>
+                  if (bad) return <td key={c.id} className="text-right text-xs text-destructive/70" title={tr("hub 忙或网络错误，点上面的「重试」", "Hub busy or network error — use Retry above")}>{tr("失败", "failed")}</td>
                   if (!cell) return <td key={c.id} className="text-right text-muted-foreground/50">—</td>
                   const best = cell.median !== null && range && cell.median === range[0]
                   return (
@@ -203,10 +203,10 @@ export function ComparePage({ nodes, onOpen, onBack }: {
                       key={c.id}
                       className="text-right"
                       style={cell.median !== null && range ? { background: latencyTint(cell.median, range) } : undefined}
-                      title={`${node.name} · ${c.name}：中位 ${ms(cell.median)} ms，丢包 ${cell.loss.toFixed(1)}%`}
+                      title={tr(`${node.name} · ${c.name}：中位 ${ms(cell.median)} ms，丢包 ${cell.loss.toFixed(1)}%`, `${node.name} · ${c.name}: median ${ms(cell.median)} ms, loss ${cell.loss.toFixed(1)}%`)}
                     >
                       <span className={`whitespace-nowrap ${best ? "font-semibold" : ""}`}>
-                        {cell.median === null ? <span className="text-destructive">全丢</span> : ms(cell.median)}
+                        {cell.median === null ? <span className="text-destructive">{tr("全丢", "all lost")}</span> : ms(cell.median)}
                         {cell.loss > 0 && cell.median !== null && (
                           <span className="ml-1.5 text-[11px]" style={{ color: lossColor(cell.loss) }}>
                             {cell.loss < 1 ? "<1" : Math.round(cell.loss)}%

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { t } from "./i18n.ts"
 
 /**
  * 一次上报的实时读数。前十二个是**核心**（列表页的四个读数格、上传下载与总流量都靠它们）；
@@ -123,7 +124,7 @@ export async function api<T>(path: string, init?: RequestInit, timeoutMs = API_T
       console.debug(`[api] ${path} -> ${res.status}`, body.slice(0, 500))
       const text = body.trim()
       const readable = text.length > 0 && text.length <= 120 && !text.startsWith("<")
-      throw new ApiError(res.status, readable ? text : `请求失败（HTTP ${res.status}）`)
+      throw new ApiError(res.status, readable ? text : t(`请求失败（HTTP ${res.status}）`, `Request failed (HTTP ${res.status})`))
     }
     return res.status === 204 ? (undefined as T) : await res.json()
   } catch (err) {
@@ -132,10 +133,10 @@ export async function api<T>(path: string, init?: RequestInit, timeoutMs = API_T
     //   `name`。漏判的后果是「请求已取消」变成原始英文 "The operation was aborted" 端到面板上。
     if (err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError")) {
       // 外部 signal 主动取消与本地超时是两件事，别都写成「超时」。
-      throw new ApiError(0, external?.aborted ? "请求已取消" : `请求超时（${Math.round(timeoutMs / 1000)} 秒）`)
+      throw new ApiError(0, external?.aborted ? t("请求已取消", "Request cancelled") : t(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`, `Request timed out (${Math.round(timeoutMs / 1000)}s)`))
     }
     // fetch 的网络层失败是 TypeError（"Failed to fetch"）：面板上写中文，别把浏览器原文端上去。
-    if (err instanceof TypeError) throw new ApiError(0, "网络错误")
+    if (err instanceof TypeError) throw new ApiError(0, t("网络错误", "Network error"))
     throw err
   } finally {
     clearTimeout(timer)
@@ -270,7 +271,7 @@ export function useNodes() {
         .then((d) => {
           // 期间 WS 推来更新的快照 → 这条回包作废，别让旧快照盖掉新帧。
           if (disposed || dataSeq !== startedAt) return
-          if (!receive(d?.nodes)) throw new Error("节点数据格式不对")
+          if (!receive(d?.nodes)) throw new Error(t("节点数据格式不对", "Malformed node data"))
         })
         .catch((e: Error) => {
           if (disposed || dataSeq !== startedAt) return

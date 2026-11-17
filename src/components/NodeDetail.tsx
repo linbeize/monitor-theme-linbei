@@ -14,6 +14,7 @@ import {
 } from "@/lib/format"
 import { ms, pingStats } from "@/lib/pingstats"
 import { rangesFor } from "@/lib/ranges"
+import { t as tr, useLang } from "@/lib/i18n"
 
 type Point = {
   ts: number
@@ -77,22 +78,28 @@ const shadeOf = (probes: { id: number }[], id: number) => {
 // ★资源图那几组 series 提到模块作用域（2026-11-09）：它们原来是每次渲染新建的数组字面量，
 //   而 TimeChart 内部的路径缓存以 series 的**身份**为依赖 —— 字面量每帧都变，缓存等于没有。
 //   这几组是常量（键、名字、颜色都不随节点变），提出来才有稳定的身份。
-const RATE_SERIES: ChartSeries[] = [
-  { key: "net_rx", name: "下行", color: "var(--ok)" },
-  { key: "net_tx", name: "上行", color: "var(--chart-2)" },
-]
-const CONN_SERIES: ChartSeries[] = [
-  { key: "tcp", name: "TCP", color: "var(--chart-1)" },
-  { key: "udp", name: "UDP", color: "var(--chart-9)" },
-]
-const PROCS_SERIES: ChartSeries[] = [{ key: "procs", name: "进程", color: "var(--chart-8)" }]
-const CPU_SERIES: ChartSeries[] = [{ key: "cpu", name: "CPU", color: "var(--chart-1)", area: true }]
-const MEM_SERIES: ChartSeries[] = [{ key: "mem_used", name: "内存", color: "var(--chart-4)", area: true }]
-const DISK_SERIES: ChartSeries[] = [{ key: "disk_used", name: "硬盘", color: "var(--chart-3)", area: true }]
+//   ★1.14.0：名字要跟着语言走，所以改成按语言建一次（组件里 `useMemo(resourceSeries, [lang])`），
+//   身份仍然只在换语言时变。
+function resourceSeries(): Record<"rate" | "conn" | "procs" | "cpu" | "mem" | "disk", ChartSeries[]> {
+  return {
+    rate: [
+      { key: "net_rx", name: tr("下行", "Download"), color: "var(--ok)" },
+      { key: "net_tx", name: tr("上行", "Upload"), color: "var(--chart-2)" },
+    ],
+    conn: [
+      { key: "tcp", name: "TCP", color: "var(--chart-1)" },
+      { key: "udp", name: "UDP", color: "var(--chart-9)" },
+    ],
+    procs: [{ key: "procs", name: tr("进程", "Processes"), color: "var(--chart-8)" }],
+    cpu: [{ key: "cpu", name: "CPU", color: "var(--chart-1)", area: true }],
+    mem: [{ key: "mem_used", name: tr("内存", "Memory"), color: "var(--chart-4)", area: true }],
+    disk: [{ key: "disk_used", name: tr("硬盘", "Disk"), color: "var(--chart-3)", area: true }],
+  }
+}
 
 const TABS = [
-  { key: "resources", label: "资源" },
-  { key: "latency", label: "网络延迟" },
+  { key: "resources", label: () => tr("资源", "Resources") },
+  { key: "latency", label: () => tr("网络延迟", "Latency") },
 ] as const
 
 /**
@@ -189,9 +196,9 @@ function despikeWindow(points: { ts: number }[]): number {
  */
 function onlineFor(node: Node) {
   if (node.online) return node.metrics ? uptime(node.metrics.uptime) : "—"
-  if (!deployed(node)) return "未接入"
+  if (!deployed(node)) return tr("未接入", "Not connected")
   const down = offlineSeconds(node)
-  return down >= 60 ? `离线 ${uptime(down)}` : "离线"
+  return down >= 60 ? tr(`离线 ${uptime(down)}`, `Offline ${uptime(down)}`) : tr("离线", "Offline")
 }
 
 /**
@@ -202,7 +209,7 @@ function cpuLine(node: Node): string {
   const cores = node.cpu_cores || 0
   const name = cpuName(node.cpu_name || "")
   if (name && cores > 0) return `${name} × ${cores}`
-  return name || (cores > 0 ? `${cores} 核` : "")
+  return name || (cores > 0 ? tr(`${cores} 核`, `${cores} cores`) : "")
 }
 
 /**
@@ -241,7 +248,7 @@ function StatusPill({ node }: { node: Node }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
       <span className={`size-1.5 rounded-full ${on ? "bg-ok" : "bg-muted-foreground/50"}`} aria-hidden />
-      {on ? (node.metrics ? `在线 ${uptime(node.metrics.uptime)}` : "在线") : onlineFor(node)}
+      {on ? (node.metrics ? tr(`在线 ${uptime(node.metrics.uptime)}`, `Online ${uptime(node.metrics.uptime)}`) : tr("在线", "Online")) : onlineFor(node)}
     </span>
   )
 }
@@ -258,6 +265,10 @@ export function NodeDetail({ node, historyDays }: {
   /** hub 的历史保留天数（`/api/me` 的 `history_days`）；老 hub 不给，按 7 天算（见 @/lib/ranges）。 */
   historyDays?: number
 }) {
+  // 语言（1.14.0）：资源图那几组 series 的名字跟着它重建。
+  const lang = useLang()
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
+  const S = useMemo(resourceSeries, [lang])
   // 页签听地址栏的：`?tab=latency` 时直接落在「网络延迟」；其余一概落「资源」，与从前一致。
   // 刷新同理：URL 里带着哪个页签，落哪个。
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>(
@@ -347,7 +358,7 @@ export function NodeDetail({ node, historyDays }: {
       .then((next) => { if (active) setData(next) })
       .catch((e: Error) => {
         // 同 App.tsx：空消息会让错误面板看起来「没有错误」，给一句兜底。
-        if (active) { setFailed(e.message || "网络错误"); setData({ metrics: [], ping: [], probes: {} }) }
+        if (active) { setFailed(e.message || tr("网络错误", "Network error")); setData({ metrics: [], ping: [], probes: {} }) }
       })
     return () => { active = false; control.abort() }
   }, [node.id, hours, tab, attempt])
@@ -380,7 +391,7 @@ export function NodeDetail({ node, historyDays }: {
           // `Math.round` would render 0.28% and 0.00% as the same badge, and the
           // absence of a badge denotes no loss.
           const loss = data?.loss?.[id] ?? 0
-          return { id, name: data?.probes?.[id] ?? `探测 ${id}`, points, loss }
+          return { id, name: data?.probes?.[id] ?? tr(`探测 ${id}`, `Probe ${id}`), points, loss }
         })
         .filter((s) => s.points.length > 0),
     [data],
@@ -557,41 +568,41 @@ export function NodeDetail({ node, historyDays }: {
             label="CPU"
             value={`${m.cpu.toFixed(1)}%`}
             pct={m.cpu}
-            sub={[node.cpu_cores > 0 ? `${node.cpu_cores} 核` : "", `负载 ${m.load[0].toFixed(2)}`].filter(Boolean).join(" · ")}
-            title={`负载 1 / 5 / 15 分钟：${m.load.map((n) => n.toFixed(2)).join(" ")}`}
+            sub={[node.cpu_cores > 0 ? tr(`${node.cpu_cores} 核`, `${node.cpu_cores} cores`) : "", tr(`负载 ${m.load[0].toFixed(2)}`, `load ${m.load[0].toFixed(2)}`)].filter(Boolean).join(" · ")}
+            title={tr(`负载 1 / 5 / 15 分钟：`, `Load 1 / 5 / 15 min: `) + m.load.map((n) => n.toFixed(2)).join(" ")}
           />
           <Stat
-            label="内存"
+            label={tr("内存", "Memory")}
             value={memTotal > 0 ? `${percent(m.mem_used, memTotal).toFixed(0)}%` : "—"}
             pct={memTotal > 0 ? percent(m.mem_used, memTotal) : null}
             sub={memTotal > 0 ? pair(m.mem_used, memTotal) : ""}
-            title={swapTotal ? `交换分区 ${pair(m.swap_used ?? 0, swapTotal)}` : swapTotal === 0 ? "没有交换分区" : undefined}
+            title={swapTotal ? tr(`交换分区 ${pair(m.swap_used ?? 0, swapTotal)}`, `Swap ${pair(m.swap_used ?? 0, swapTotal)}`) : swapTotal === 0 ? tr("没有交换分区", "No swap") : undefined}
           />
           <Stat
-            label="硬盘"
+            label={tr("硬盘", "Disk")}
             value={diskTotal > 0 ? `${percent(m.disk_used, diskTotal).toFixed(0)}%` : "—"}
             pct={diskTotal > 0 ? percent(m.disk_used, diskTotal) : null}
             sub={diskTotal > 0 ? pair(m.disk_used, diskTotal) : ""}
           />
-          <Stat label="网速" value={`↓ ${rate(m.net_rx)}`} sub={`↑ ${rate(m.net_tx)}`} />
+          <Stat label={tr("网速", "Speed")} value={`↓ ${rate(m.net_rx)}`} sub={`↑ ${rate(m.net_tx)}`} />
           <Stat
-            label="今日流量"
+            label={tr("今日流量", "Traffic today")}
             value={bytes(node.day_rx + node.day_tx)}
             sub={`↓ ${bytes(node.day_rx)} · ↑ ${bytes(node.day_tx)}`}
           />
           <Stat
             label="TCP / UDP"
             value={m.tcp !== null && m.udp !== null ? `${m.tcp} / ${m.udp}` : "—"}
-            sub={typeof m.procs === "number" && m.procs > 0 ? `${m.procs} 进程` : ""}
+            sub={typeof m.procs === "number" && m.procs > 0 ? tr(`${m.procs} 进程`, `${m.procs} processes`) : ""}
           />
         </div>
       )}
 
       <div className="space-y-2 border-t border-border/70 pt-4">
         <div className="flex gap-1">
-          {TABS.map((t) => (
-            <Tab key={t.key} active={tab === t.key} onClick={() => chooseTab(t.key)}>
-              {t.label}
+          {TABS.map((tb) => (
+            <Tab key={tb.key} active={tab === tb.key} onClick={() => chooseTab(tb.key)}>
+              {tb.label()}
             </Tab>
           ))}
         </div>
@@ -615,7 +626,7 @@ export function NodeDetail({ node, historyDays }: {
                 onChange={(e) => setSmooth(e.target.checked)}
                 className="accent-foreground"
               />
-              削峰
+              {tr("削峰", "Despike")}
             </label>
           )}
         </div>
@@ -632,14 +643,14 @@ export function NodeDetail({ node, historyDays }: {
         </div>
       ) : failed ? (
         <EmptyPanel tone="error">
-          读取历史数据失败：{failed}
+          {tr("读取历史数据失败：", "Failed to load history: ")}{failed}
           <span className="mt-3 block">
-            <Button variant="outline" size="sm" onClick={() => setAttempt((n) => n + 1)}>重试</Button>
+            <Button variant="outline" size="sm" onClick={() => setAttempt((n) => n + 1)}>{tr("重试", "Retry")}</Button>
           </span>
         </EmptyPanel>
       ) : tab === "latency" ? (
         pingSeries.length === 0 ? (
-          <EmptyPanel>这段时间没有延迟数据</EmptyPanel>
+          <EmptyPanel>{tr("这段时间没有延迟数据", "No latency data in this range")}</EmptyPanel>
         ) : (
           // An explicit pixel height on the column, so the chart can be `flex-1`
           // within it while the legend takes what it needs: four probes are one row
@@ -659,7 +670,7 @@ export function NodeDetail({ node, historyDays }: {
             // 最小高度 27rem：统计表（表头 + 每条线路一行）摆在面板里，手机上 calc 出来的高度很小，
             // 原来的 min-h-72 会把图挤到不足 100px。
             className="h-full min-h-[27rem]">
-            <Panel fill title="网络延迟">
+            <Panel fill title={tr("网络延迟", "Latency")}>
             <div className="flex h-full min-h-0 flex-col gap-3">
             {/* `min-h-0` is what makes `flex-1` a real number rather than the
                 content's own height: ResponsiveContainer reads its parent, and
@@ -668,7 +679,7 @@ export function NodeDetail({ node, historyDays }: {
                 resolves at layout instead of coming back 0. */}
             <div className="min-h-0 w-full flex-1 text-muted-foreground">
               {shownProbes.length === 0 ? (
-                <p className="py-8 text-center text-sm">没有选中任何探测</p>
+                <p className="py-8 text-center text-sm">{tr("没有选中任何探测", "No probe selected")}</p>
               ) : (
                 <TimeChart
                   wheelZoom
@@ -681,7 +692,7 @@ export function NodeDetail({ node, historyDays }: {
                   left={52}
                   // 缩放与对位都归图表自己管（滚轮纵向缩放 + 左键拖着线平移，见 Chart 的
                   // `wheelZoom`）：原来那套「横向拖选一段放大」2026-10-15 按站长的要求去掉了。
-                  label="节点延迟走势"
+                  label={tr("节点延迟走势", "Latency over time")}
                   renderTooltip={(row) => (
                     <PingTooltip active label={row.ts} rowByTs={rowByTs} probes={shownProbes} smooth={smooth} style={style} />
                   )}
@@ -701,17 +712,17 @@ export function NodeDetail({ node, historyDays }: {
                 <thead className="text-muted-foreground">
                   <tr className="[&>th]:px-1.5 [&>th]:pb-1 [&>th]:text-right [&>th]:font-normal">
                     <th className="!text-left">
-                      线路 <span className="opacity-70">· ms</span>
-                      {pingSeries.length > 1 && !smokeping && <span className="ml-1.5 hidden opacity-70 sm:inline">（双击单看）</span>}
+                      {tr("线路", "Probe")} <span className="opacity-70">· ms</span>
+                      {pingSeries.length > 1 && !smokeping && <span className="ml-1.5 hidden opacity-70 sm:inline">{tr("（双击单看）", "(double-click to isolate)")}</span>}
                     </th>
-                    <th>当前</th>
-                    <th>平均</th>
-                    <th className="hidden sm:table-cell">中位</th>
-                    <th className="hidden sm:table-cell" title="95% 的时间延迟不超过这个数">P95</th>
-                    <th className="hidden sm:table-cell">最低</th>
-                    <th className="hidden sm:table-cell">最高</th>
-                    <th className="hidden sm:table-cell" title="相邻两次延迟之差的平均值，越小越稳">抖动</th>
-                    <th>丢包</th>
+                    <th>{tr("当前", "Now")}</th>
+                    <th>{tr("平均", "Avg")}</th>
+                    <th className="hidden sm:table-cell">{tr("中位", "Median")}</th>
+                    <th className="hidden sm:table-cell" title={tr("95% 的时间延迟不超过这个数", "Latency stays below this 95% of the time")}>P95</th>
+                    <th className="hidden sm:table-cell">{tr("最低", "Min")}</th>
+                    <th className="hidden sm:table-cell">{tr("最高", "Max")}</th>
+                    <th className="hidden sm:table-cell" title={tr("相邻两次延迟之差的平均值，越小越稳", "Mean change between consecutive samples — lower is steadier")}>{tr("抖动", "Jitter")}</th>
+                    <th>{tr("丢包", "Loss")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -725,7 +736,7 @@ export function NodeDetail({ node, historyDays }: {
                         key={s.id}
                         onClick={toggle}
                         onDoubleClick={() => setHiddenProbes(pingSeries.filter((p) => p.id !== s.id).map((p) => p.id))}
-                        title="单击显示/隐藏，双击只看这一条"
+                        title={tr("单击显示/隐藏，双击只看这一条", "Click to show/hide, double-click to isolate")}
                         className={`cursor-pointer select-none border-t transition-opacity hover:bg-muted/50 [&>td]:px-1.5 [&>td]:py-1 [&>td]:text-right ${
                           shown ? "" : "opacity-40"
                         }`}
@@ -768,16 +779,16 @@ export function NodeDetail({ node, historyDays }: {
             {/* Smokeping 视图的丢包图例：中位线的颜色就是这一段的丢包档。 */}
             {smokeping && (
               <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span>丢包</span>
+                <span>{tr("丢包", "Loss")}</span>
                 {LOSS_SCALE.map((b) => (
-                  <span key={b.label} className="inline-flex items-center gap-1">
+                  <span key={b.color} className="inline-flex items-center gap-1">
                     <span className="inline-block h-1 w-3 rounded-sm" style={{ background: b.color }} aria-hidden />
-                    {b.label}
+                    {b.label()}
                   </span>
                 ))}
                 <span className="inline-flex items-center gap-1">
                   <span className="inline-block h-2.5 w-2 rounded-sm bg-destructive/20" aria-hidden />
-                  全丢的时段
+                  {tr("全丢的时段", "Fully lost periods")}
                 </span>
               </div>
             )}
@@ -790,7 +801,7 @@ export function NodeDetail({ node, historyDays }: {
           </>
         )
       ) : metricRows.length === 0 ? (
-        <EmptyPanel>这段时间没有历史数据</EmptyPanel>
+        <EmptyPanel>{tr("这段时间没有历史数据", "No history in this range")}</EmptyPanel>
       ) : (
         // ★2026-10-30 与 rakugaki 1.20.0 同轮：资源区改成**每排两张、一共三排**（lg 起两列；
         //   窄屏仍是一列）。进程卡排在 CPU 之前。
@@ -799,16 +810,16 @@ export function NodeDetail({ node, historyDays }: {
               其后 进程 / CPU / 内存 / 硬盘（进程卡 2026-10-30 加、照站长要求排在 CPU 之前）。 */}
           {/* A rate has no total to be a fraction of, so this one climbs the
               ladder like CPU rather than pinning to a capacity. */}
-          <Panel title="网络速率">
+          <Panel title={tr("网络速率", "Network speed")}>
             <TimeChart
               rows={metricRows}
-              series={RATE_SERIES}
+              series={S.rate}
               hours={hours}
               top={tops.rate}
               unit="/s"
               yFormat={axisBytes}
               format={(v) => rate(v)}
-              label="网络速率走势"
+              label={tr("网络速率走势", "Network speed over time")}
             />
           </Panel>
 
@@ -816,38 +827,38 @@ export function NodeDetail({ node, historyDays }: {
               （TCP 蓝 / UDP 粉）。数据就在同一次历史指标（metrics）响应的 `tcp / udp` 两列里
               （hub 1.4.x 的 metrics 桶实测带这两个键）。口径与其余几张同款、
               只是不填面积：连接数是计数，不是「占了多少容量」。 */}
-          <Panel title="TCP / UDP 连接">
+          <Panel title={tr("TCP / UDP 连接", "TCP / UDP connections")}>
             <TimeChart
               rows={metricRows}
-              series={CONN_SERIES}
+              series={S.conn}
               hours={hours}
               top={tops.conn}
-              label="TCP / UDP 连接数走势"
+              label={tr("TCP / UDP 连接数走势", "TCP / UDP connections over time")}
             />
           </Panel>
 
           {/* ★2026-10-30 与 rakugaki 1.20.0 同轮新增：进程总数走势。hub 只上报进程**数**
               （`procs`），没有逐进程的列表 —— 所以这张画的是条数，口径与「TCP / UDP 连接」同款：
               计数不填面积、轴顶取窗口峰值并补到 4 的倍数。标题右端就是当前值。 */}
-          <Panel title={m && typeof m.procs === "number" ? `进程 · ${m.procs}` : "进程"}>
+          <Panel title={m && typeof m.procs === "number" ? `${tr("进程", "Processes")} · ${m.procs}` : tr("进程", "Processes")}>
             <TimeChart
               rows={metricRows}
-              series={PROCS_SERIES}
+              series={S.procs}
               hours={hours}
               top={tops.procs}
-              label="进程数走势"
+              label={tr("进程数走势", "Processes over time")}
             />
           </Panel>
 
           <Panel title="CPU">
             <TimeChart
               rows={metricRows}
-              series={CPU_SERIES}
+              series={S.cpu}
               hours={hours}
               top={tops.cpu}
               unit="%"
               format={(v) => `${v.toFixed(1)}%`}
-              label="CPU 使用率走势"
+              label={tr("CPU 使用率走势", "CPU usage over time")}
             />
           </Panel>
 
@@ -856,40 +867,40 @@ export function NodeDetail({ node, historyDays }: {
               own maximum, which is what an area chart does by default, puts
               127 MB of a 457 MB box at the top of the panel. The size is in the
               title because the axis top is claiming it. */}
-          <Panel title={memTotal > 0 ? `内存 · ${bytes(memTotal)}` : "内存"}>
+          <Panel title={memTotal > 0 ? `${tr("内存", "Memory")} · ${bytes(memTotal)}` : tr("内存", "Memory")}>
             {memTotal > 0 ? (
               <TimeChart
                 rows={metricRows}
-                series={MEM_SERIES}
+                series={S.mem}
                 hours={hours}
                 top={memTotal}
                 yFormat={axisBytes}
                 format={(v) => bytes(v)}
-                label="内存使用量走势"
+                label={tr("内存使用量走势", "Memory usage over time")}
               />
             ) : (
               // 总量缺失时轴只能是 0~1 B，几百 MB 的线整条被裁到框外 —— 与其给一张空白图，
               // 不如直说没上报（2026-10-20 审出）。
-              <p className="py-8 text-center text-sm text-muted-foreground">未上报内存总量</p>
+              <p className="py-8 text-center text-sm text-muted-foreground">{tr("未上报内存总量", "Total memory not reported")}</p>
             )}
           </Panel>
 
           {/* The disk it is filling, for the same reason as memory: a node
               using 2.7% of its disk draws along the top of the panel when the
               axis tracks the window's own maximum. */}
-          <Panel title={diskTotal > 0 ? `硬盘 · ${bytes(diskTotal)}` : "硬盘"}>
+          <Panel title={diskTotal > 0 ? `${tr("硬盘", "Disk")} · ${bytes(diskTotal)}` : tr("硬盘", "Disk")}>
             {diskTotal > 0 ? (
               <TimeChart
                 rows={metricRows}
-                series={DISK_SERIES}
+                series={S.disk}
                 hours={hours}
                 top={diskTotal}
                 yFormat={axisBytes}
                 format={(v) => bytes(v)}
-                label="硬盘使用量走势"
+                label={tr("硬盘使用量走势", "Disk usage over time")}
               />
             ) : (
-              <p className="py-8 text-center text-sm text-muted-foreground">未上报硬盘总量</p>
+              <p className="py-8 text-center text-sm text-muted-foreground">{tr("未上报硬盘总量", "Total disk not reported")}</p>
             )}
           </Panel>
         </div>

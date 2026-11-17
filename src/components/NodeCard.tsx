@@ -5,9 +5,10 @@ import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Meter, usageColor } from "@/components/Meter"
 import type { Node } from "@/lib/api"
-import { CYCLE_SHORT, FOREVER, bytes, daysUntil, money, osName, pair, percent, rate, uptime } from "@/lib/format"
+import { FOREVER, bytes, cycleShort, daysUntil, money, osName, pair, percent, rate, uptime } from "@/lib/format"
 import { remarkChips, type RemarkChip } from "@/lib/notes"
 import { EXPIRING_DAYS, URGENT_DAYS } from "@/lib/overview"
+import { t as tr } from "@/lib/i18n"
 
 /**
  * This period's usage as the plan meters it. The hub computes it; the switch
@@ -70,11 +71,11 @@ const CARD_CHIPS = 2
  *   `≥` 是自绘的，线宽按 16 视口折成 1.4，显示出来与 lucide 的 2.0/24 视口等粗）；
  *   老 hub 没有这个字段时按 `sum` 处理（与 monthUsage 的 default 同一口径）。
  */
-const TRAFFIC_MODE_LABEL: Record<string, string> = {
-  sum: "上下行相加",
-  max: "取较大值",
-  up: "仅上行",
-  down: "仅下行",
+const TRAFFIC_MODE_LABEL: Record<string, () => string> = {
+  sum: () => tr("上下行相加", "upload + download"),
+  max: () => tr("取较大值", "the larger of the two"),
+  up: () => tr("仅上行", "upload only"),
+  down: () => tr("仅下行", "download only"),
 }
 
 function TrafficModeIcon({ mode }: { mode: string }) {
@@ -114,8 +115,8 @@ export function live(node: Node): boolean {
  */
 export function metaLine(node: Node): string {
   const state = node.metrics
-    ? `运行时间 ${uptime(node.metrics.uptime)}`
-    : node.online ? "在线" : deployed(node) ? "已离线" : "未接入"
+    ? tr(`运行时间 ${uptime(node.metrics.uptime)}`, `up ${uptime(node.metrics.uptime)}`)
+    : node.online ? tr("在线", "online") : deployed(node) ? tr("已离线", "offline") : tr("未接入", "not connected")
   return [osName(node.os), state].filter(Boolean).join(" · ")
 }
 
@@ -140,15 +141,15 @@ function rateParts(n: number): [string, string] {
 function noteText(node: Node): { price: string; left: string; days: number | null } {
   // ★`CYCLE_SHORT` 是普通对象：`billing_cycle = "constructor"` 会取到 Object 构造函数，
   //   模板字符串把函数源码印到卡片上。`Object.hasOwn` 是零成本的闸（2026-10-20 审出）。
-  const cycle = Object.hasOwn(CYCLE_SHORT, node.billing_cycle) ? CYCLE_SHORT[node.billing_cycle] : ""
+  const cycle = cycleShort(node.billing_cycle)
   // ★价格只认数字：字符串 "349" 会让 `> 0` 为真、随后 moneyAmount 退成 ¥0.00
   //   （有价格却显示 0，2026-10-20 审出）。
   const price = typeof node.price === "number" && Number.isFinite(node.price) && node.price > 0
-    ? `价格 ${money(node.price, node.currency)}${cycle ? `/${cycle}` : ""}`
+    ? `${tr("价格", "Price")} ${money(node.price, node.currency)}${cycle ? `/${cycle}` : ""}`
     : ""
   const days = node.expires_in !== undefined ? node.expires_in : daysUntil(node.expires_at)
   const left = days === null || days === undefined ? ""
-    : days < 0 ? `已过期 ${-days} 天` : days === 0 ? "今天到期" : `剩余 ${days} 天`
+    : days < 0 ? tr(`已过期 ${-days} 天`, `expired ${-days}d ago`) : days === 0 ? tr("今天到期", "expires today") : tr(`剩余 ${days} 天`, `${days} days left`)
   return { price, left, days: typeof days === "number" ? days : null }
 }
 
@@ -227,7 +228,7 @@ export function RemarkChips({ chips }: { chips: RemarkChip[] }) {
           //   （Inter 11px 的字体框 ascent+descent ≈ 13.3px）；py 用 [0px] 这种任意值压掉基类的
           //   py-0.5（Tailwind 把任意值排在后面，可靠）。两者一凑，高度还是 16px。
           className={"min-w-0 shrink font-normal " + (c.own ? "gap-1 text-muted-foreground " : "") + "px-1.5 py-[0px] text-[11px] leading-3.5"}
-          title={c.own ? "仅自己可见：" + c.text : c.text}
+          title={c.own ? tr("仅自己可见：", "Only visible to you: ") + c.text : c.text}
         >
           {/* 锁图标尺寸交给 Badge 基类的 `[&>svg]:size-3`（0,1,1）—— 挂在图标上的 size-2.5
               是单类选择器（0,1,0），永远输、是死类（2026-10-15 审出来），别再写。 */}
@@ -285,13 +286,13 @@ export function NodeCard({ node, onOpen, onWarm }: {
   // 计费方式的说明文字：那枚图标只有形状，`title` 只在鼠标悬停时出现 —— 键盘与读屏都拿不到
   // 语义，所以下面那个 span 补 `role="img" aria-label`（2026-11-09 补）。
   const modeLabel = Object.hasOwn(TRAFFIC_MODE_LABEL, node.traffic_mode)
-    ? TRAFFIC_MODE_LABEL[node.traffic_mode]
-    : TRAFFIC_MODE_LABEL.sum
+    ? TRAFFIC_MODE_LABEL[node.traffic_mode]()
+    : TRAFFIC_MODE_LABEL.sum()
   // 第四格的两行速率（数值 / 单位分开渲染，见 rateParts）。
   const upRate = m ? rateParts(m.net_tx) : null
   const downRate = m ? rateParts(m.net_rx) : null
   // 可访问名：名字 + 离线状态；空名字给一句兜底，别让链接没有名字。
-  const label = `${node.name || "未命名节点"}${deployed(node) && !node.online ? "（已离线）" : ""}`
+  const label = `${node.name || tr("未命名节点", "Unnamed node")}${deployed(node) && !node.online ? tr("（已离线）", " (offline)") : ""}`
   return (
     <Card
       // 摸到卡片（悬停 / 键盘 Tab 到它 / 手指按下）就先取详情那块 chunk：真要打开的人，
@@ -350,7 +351,7 @@ export function NodeCard({ node, onOpen, onWarm }: {
         {/* 徽章只给「接入过、现在掉线」的机器：从未接入的卡片下面那行说明已经说清了，
             连上但还没上报的更不该被盖上「已离线」。 */}
         {deployed(node) && !node.online && (
-          <Badge className="shrink-0 bg-down/12 font-normal text-down">已离线</Badge>
+          <Badge className="shrink-0 bg-down/12 font-normal text-down">{tr("已离线", "Offline")}</Badge>
         )}
       </div>
 
@@ -372,18 +373,18 @@ export function NodeCard({ node, onOpen, onWarm }: {
           <div data-metrics="" className="mt-2 grid grid-cols-[1fr_1fr_1fr_1.35fr] gap-x-3 border-t pt-2">
             <Meter
               label="CPU"
-              title={cores > 0 ? `${cores} 核` : undefined}
+              title={cores > 0 ? tr(`${cores} 核`, `${cores} cores`) : undefined}
               pct={m ? m.cpu : null}
               value={m ? `${m.cpu.toFixed(2)}%` : "—"}
             />
             <Meter
-              label="内存"
+              label={tr("内存", "Memory")}
               title={m ? pair(m.mem_used, m.mem_total) : bytes(node.mem_total)}
               pct={m ? percent(m.mem_used, m.mem_total) : null}
               value={m ? `${percent(m.mem_used, m.mem_total).toFixed(2)}%` : "—"}
             />
             <Meter
-              label="存储"
+              label={tr("存储", "Disk")}
               title={m ? pair(m.disk_used, m.disk_total) : bytes(node.disk_total)}
               pct={m ? percent(m.disk_used, m.disk_total) : null}
               value={m ? `${percent(m.disk_used, m.disk_total).toFixed(2)}%` : "—"}
@@ -391,11 +392,11 @@ export function NodeCard({ node, onOpen, onWarm }: {
             <div
               data-net="cell"
               role="group"
-              aria-label="上传 / 下载"
+              aria-label={tr("上传 / 下载", "Upload / download")}
               className="min-w-0"
               title={m
-                ? `上传 ${rate(m.net_tx)} · 累计 ${bytes(totalTx)}\n下载 ${rate(m.net_rx)} · 累计 ${bytes(totalRx)}`
-                : `累计 ${bytes(totalTx)} / ${bytes(totalRx)}`}
+                ? tr(`上传 ${rate(m.net_tx)} · 累计 ${bytes(totalTx)}\n下载 ${rate(m.net_rx)} · 累计 ${bytes(totalRx)}`, `Upload ${rate(m.net_tx)} · total ${bytes(totalTx)}\nDownload ${rate(m.net_rx)} · total ${bytes(totalRx)}`)
+                : tr(`累计 ${bytes(totalTx)} / ${bytes(totalRx)}`, `Total ${bytes(totalTx)} / ${bytes(totalRx)}`)}
             >
               {/* 数值 13px（与左边读数同档）+ 单位 10px 灰：这格没有表名、也没有条，靠这一档
                   把「649 B/s」拉回读数区那一层，而不是读成两行备注；行高 16 / 18 分别对住
@@ -417,13 +418,13 @@ export function NodeCard({ node, onOpen, onWarm }: {
                 图标且分居两端，中间不再被夹住。重置图标仍是 lucide Repeat（12px、1.8 线宽）。 */}
           <div className="mt-2 flex items-center justify-between gap-3">
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
-              流量
+              {tr("流量", "Traffic")}
               <span aria-hidden className="size-[2px] shrink-0 rounded-full bg-current opacity-40" />
               <span data-reset className="tnum truncate">
                 {/* 重置日缺失（形状漂移）写「—」而不是「每月 undefined 日」；不限量仍是 N/A。
                     2026-10-21：末尾那枚 ⇄ 去掉，直接写「重置」—— 两个字的语义比一个循环图标清楚，
                     这一行也不再是「文字-图标-文字-图标」的夹心。 */}
-                {node.traffic_limit > 0 ? (resetDay > 0 ? `${resetDay} 日重置` : "—") : "N/A"}
+                {node.traffic_limit > 0 ? (resetDay > 0 ? tr(`${resetDay} 日重置`, `resets on day ${resetDay}`) : "—") : "N/A"}
               </span>
             </span>
             {/* 右侧：计费方式 + 用量分色（已用 13px 加粗、额度 11px 灰）—— 一行里先读到「用了多少」，
@@ -431,11 +432,11 @@ export function NodeCard({ node, onOpen, onWarm }: {
             <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold leading-[18px]">
               <span
                 data-net-mode={node.traffic_mode || "sum"}
-                title={`计费方式：${modeLabel}`}
+                title={tr(`计费方式：${modeLabel}`, `Billed as ${modeLabel}`)}
                 // 图标本身 `aria-hidden`，语义挂在这层：读屏念「计费方式：取较大值」，
                 // 不再是一枚没有名字的图形；`title` 保留给鼠标（2026-11-09 补）。
                 role="img"
-                aria-label={`计费方式：${modeLabel}`}
+                aria-label={tr(`计费方式：${modeLabel}`, `Billed as ${modeLabel}`)}
                 className="flex shrink-0 items-center text-muted-foreground"
               >
                 <TrafficModeIcon mode={node.traffic_mode} />
@@ -479,7 +480,7 @@ export function NodeCard({ node, onOpen, onWarm }: {
         /* Never connected: nothing to plot, so the card stays short rather than
            padding out to match its neighbours. */
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          还没有接入。在后台生成安装命令并执行一次。
+          {tr("还没有接入。在后台生成安装命令并执行一次。", "Not connected yet. Generate the install command in the admin panel and run it once.")}
         </p>
       )}
     </Card>
