@@ -1,15 +1,17 @@
 import { Activity, Search, X } from "lucide-react"
 
 import type { Node } from "@/lib/api"
-import { bytes, rate } from "@/lib/format"
+import { convert, monthlyCost } from "@/lib/cost"
+import { bytes, money, rate } from "@/lib/format"
+import { FX_SOURCE, useRates } from "@/lib/fx"
 import {
-  DEFAULT_FILTER, EXPIRING_DAYS, isDefault, SORTS, STATUSES, summarize, type ListFilter, type Summary,
+  DEFAULT_FILTER, isDefault, SORTS, STATUSES, summarize, type ListFilter, type Summary,
 } from "@/lib/overview"
 import { plural, t as tr } from "@/lib/i18n"
 
 /**
  * 首页卡片上方的两块（1.12.0）：
- *   ① 总览条：在线台数、实时总网速、本月总流量、即将到期台数（点它＝筛出那几台）；
+ *   ① 总览条：在线台数、实时总网速、本月总流量、每月成本（1.15.0 起替掉「即将到期」，到期台数挪到状态筛选上）；
  *   ② 筛选栏：搜索框、状态、排序，下面一行地区（国旗 + 台数，点一下只看这个地区，再点取消）。
  * 筛选只是「看哪几张卡」，不改卡片本身；状态由 App 持有并同步进地址栏（见 @/lib/overview）。
  */
@@ -32,14 +34,7 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
         <Tile label={tr("在线", "Online")} value={`${s.online} / ${s.total}`} sub={s.online < s.total ? tr(`${s.total - s.online} 台离线`, `${s.total - s.online} offline`) : tr("全部在线", "All online")} />
         <Tile label={tr("实时总网速", "Total speed")} value={`↓ ${rate(s.rx)}`} sub={`↑ ${rate(s.tx)}`} />
         <Tile label={tr("本月总流量", "Traffic this month")} value={bytes(s.month)} sub={tr("所有机器上下行合计", "Up + down, all nodes")} />
-        <Tile
-          label={tr("即将到期", "Expiring soon")}
-          value={tr(`${s.expiring} 台`, plural(s.expiring, "node"))}
-          sub={tr(`${EXPIRING_DAYS} 天内（含已过期）`, `Next ${EXPIRING_DAYS} days`)}
-          tone={s.expiring > 0 ? "warn" : undefined}
-          active={filter.st === "expiring"}
-          onClick={s.expiring > 0 ? () => set({ st: filter.st === "expiring" ? "all" : "expiring" }) : undefined}
-        />
+        <CostTile nodes={nodes} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -66,6 +61,10 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
               }`}
             >
               {st.label()}
+              {/* 「即将到期」那颗带上台数（1.15.0：总览条那格换成了每月成本，到期数挪到这里）。 */}
+              {st.key === "expiring" && s.expiring > 0 && (
+                <span className={`ml-1 tabular-nums ${filter.st === st.key ? "" : "text-[oklch(0.62_0.16_60)]"}`}>{s.expiring}</span>
+              )}
             </button>
           ))}
         </div>
@@ -125,13 +124,50 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
   )
 }
 
-function Tile({ label, value, sub, tone, active, onClick }: {
+/**
+ * 每月成本（1.15.0，替掉原来的「即将到期」那格）：付费机器按周期折到每月、按币种加总，
+ * 再按实时汇率折成人民币（@/lib/cost、@/lib/fx）。汇率取不到时分币种显示「¥x + $y」。
+ * 悬停看分币种明细与汇率；ExchangeRate-API 的条款要求注明来源，所以下面那行小字带个链接。
+ */
+function CostTile({ nodes }: { nodes: Node[] }) {
+  const cost = monthlyCost(nodes)
+  const base = "CNY"
+  const rates = useRates(base, cost.byCurrency.size > 0)
+  const total = rates ? convert(cost.byCurrency, rates.rates, base) : null
+  const parts = [...cost.byCurrency].sort((a, b) => b[1] - a[1]).map(([cur, amt]) => money(amt, cur))
+  const per = tr("/月", "/mo")
+  const value = cost.paid === 0 ? "—" : total !== null ? `¥${amount(total)}${per}` : parts.join(" + ")
+  const rateNote = rates
+    ? [...cost.byCurrency.keys()].filter((c) => c && c !== base && rates.rates[c]).map((c) => `1 ${c} ≈ ${(1 / rates.rates[c]).toFixed(2)} ${base}`).join(" · ")
+    : ""
+  const title = [parts.join(" + ") + per, rateNote, cost.skipped ? tr(`另有 ${cost.skipped} 台一次性付款未计入`, `${cost.skipped} one-time payment(s) not included`) : ""]
+    .filter(Boolean).join("\n")
+  const count = tr(`${cost.paid} 台付费`, plural(cost.paid, "paid node"))
+  return (
+    <Tile
+      label={tr("每月成本", "Monthly cost")}
+      value={value}
+      title={cost.paid ? title : undefined}
+      sub={total !== null ? (
+        <>
+          {count} · <a href={FX_SOURCE} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{tr("实时汇率", "live FX")}</a>
+        </>
+      ) : cost.byCurrency.size > 1 ? `${count} · ${tr("未换算", "not converted")}` : count}
+    />
+  )
+}
+
+/** 金额：百元以上取整、带千分位；以下留两位。 */
+const amount = (n: number) => (n >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(2))
+
+function Tile({ label, value, sub, tone, active, onClick, title }: {
   label: string
   value: string
-  sub: string
+  sub: React.ReactNode
   tone?: "warn"
   active?: boolean
   onClick?: () => void
+  title?: string
 }) {
   const body = (
     <>
@@ -151,6 +187,6 @@ function Tile({ label, value, sub, tone, active, onClick }: {
       {body}
     </button>
   ) : (
-    <div className={cls}>{body}</div>
+    <div className={cls} title={title}>{body}</div>
   )
 }
