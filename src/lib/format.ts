@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts"
 const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
 const unitOf = (n: number) => Math.min(Math.floor(Math.log(n) / Math.log(1024)), UNITS.length - 1)
@@ -114,7 +115,7 @@ export function uptime(seconds: number): string {
   const d = Math.floor(seconds / 86400)
   const h = Math.floor((seconds % 86400) / 3600)
   const m = Math.floor((seconds % 3600) / 60)
-  return d > 0 ? `${d} 天 ${h} 小时` : h > 0 ? `${h} 小时 ${m} 分` : `${m} 分`
+  return d > 0 ? t(`${d} 天 ${h} 小时`, `${d}d ${h}h`) : h > 0 ? t(`${h} 小时 ${m} 分`, `${h}h ${m}m`) : t(`${m} 分`, `${m}m`)
 }
 
 /** Whole days until a date, negative once it has passed. */
@@ -217,6 +218,23 @@ const MDHHMM = new Intl.DateTimeFormat("zh-CN", {
 
 /** 只到日：一周以上的窗口一格跨几天甚至几个月，时分是噪声（见 clockFor）。 */
 const MD = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" })
+
+/** CYCLE_SHORT 的英文版（1.14.0）。键必须与中文那份一一对应。 */
+export const CYCLE_SHORT_EN: Record<string, string> = {
+  monthly: "mo",
+  quarterly: "qtr",
+  semiannual: "6 mo",
+  yearly: "yr",
+  biennial: "2 yr",
+  triennial: "3 yr",
+  once: "one-time",
+}
+
+/** 付款周期的短写法（按当前语言）；不认识的键给空串（`Object.hasOwn` 挡掉原型链上的键）。 */
+export function cycleShort(key: string): string {
+  if (!Object.hasOwn(CYCLE_SHORT, key)) return ""
+  return t(CYCLE_SHORT[key], CYCLE_SHORT_EN[key] ?? CYCLE_SHORT[key])
+}
 
 export function clock(ms: number): string {
   return HHMM.format(ms)

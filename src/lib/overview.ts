@@ -1,4 +1,5 @@
 import type { Node } from "./api.ts"
+import { t } from "./i18n.ts"
 
 /**
  * 首页的总览 / 搜索 / 筛选 / 排序（1.12.0）。全是纯函数：App 只管把状态塞进来、把结果画出去。
@@ -12,21 +13,22 @@ export type ListFilter = { q: string; cc: string; st: Status; sort: SortKey }
 
 export const DEFAULT_FILTER: ListFilter = { q: "", cc: "", st: "all", sort: "default" }
 
-export const STATUSES: { key: Status; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "online", label: "在线" },
-  { key: "offline", label: "离线" },
-  { key: "expiring", label: "即将到期" },
+/** 标签在渲染时按语言取（`label()`）：模块级常量不能直接存 `t()` 的结果。 */
+export const STATUSES: { key: Status; label: () => string }[] = [
+  { key: "all", label: () => t("全部", "All") },
+  { key: "online", label: () => t("在线", "Online") },
+  { key: "offline", label: () => t("离线", "Offline") },
+  { key: "expiring", label: () => t("即将到期", "Expiring") },
 ]
 
-export const SORTS: { key: SortKey; label: string }[] = [
-  { key: "default", label: "默认排序" },
-  { key: "cpu", label: "CPU 占用" },
-  { key: "mem", label: "内存占用" },
-  { key: "disk", label: "硬盘占用" },
-  { key: "net", label: "实时网速" },
-  { key: "traffic", label: "本月流量" },
-  { key: "expiry", label: "剩余天数" },
+export const SORTS: { key: SortKey; label: () => string }[] = [
+  { key: "default", label: () => t("默认排序", "Default order") },
+  { key: "cpu", label: () => t("CPU 占用", "CPU usage") },
+  { key: "mem", label: () => t("内存占用", "Memory usage") },
+  { key: "disk", label: () => t("硬盘占用", "Disk usage") },
+  { key: "net", label: () => t("实时网速", "Network speed") },
+  { key: "traffic", label: () => t("本月流量", "Monthly traffic") },
+  { key: "expiry", label: () => t("剩余天数", "Days left") },
 ]
 
 /** 「即将到期」的线：30 天内（含已过期）。卡片上 ≤30 天转黄、≤7 天转红，用的是同两条线。 */

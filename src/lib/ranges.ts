@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts"
 /**
  * 「时间范围」那排按钮：按 hub 的保留天数生成。
  *
@@ -16,9 +17,9 @@
  * 最多 6 枚（1 小时 / 6 小时 / 24 小时 / 7 天 / 30 天 / 保留天数）——再多一行放不下。
  */
 const BASE = [
-  { hours: 1, label: "1 小时" },
-  { hours: 6, label: "6 小时" },
-  { hours: 24, label: "24 小时" },
+  { hours: 1 },
+  { hours: 6 },
+  { hours: 24 },
 ]
 
 /** 保留天数这座「阶梯」：够得着才摆出来。 */
@@ -26,13 +27,22 @@ const LADDER = [7, 30]
 
 export type Range = { hours: number; label: string }
 
+/** 按钮上的字：整天的写「N 天」，其余写「N 小时」（按当前语言）。 */
+export function rangeLabel(hours: number): string {
+  if (hours > 24 && hours % 24 === 0) {
+    const d = hours / 24
+    return t(`${d} 天`, `${d} ${d === 1 ? "day" : "days"}`)
+  }
+  return t(`${hours} 小时`, `${hours} ${hours === 1 ? "hour" : "hours"}`)
+}
+
 export function rangesFor(days: unknown): Range[] {
   // 类型不对（老 hub 没有这个字段、站长存的不是数字）一律按 7 天。
   const n = typeof days === "number" && Number.isFinite(days) ? Math.floor(days) : 7
   // hub 自己把保留天数钳在 1~365；这边再钳一次，免得一个手改的值把按钮排成 400 枚。
   const hours = Math.min(365, Math.max(1, n)) * 24
-  const out: Range[] = [...BASE]
-  for (const d of LADDER) if (d * 24 < hours && !out.some((r) => r.hours === d * 24)) out.push({ hours: d * 24, label: `${d} 天` })
-  if (hours > 24 && !out.some((r) => r.hours === hours)) out.push({ hours, label: `${hours / 24} 天` })
+  const out: Range[] = BASE.map((r) => ({ hours: r.hours, label: rangeLabel(r.hours) }))
+  for (const d of LADDER) if (d * 24 < hours && !out.some((r) => r.hours === d * 24)) out.push({ hours: d * 24, label: rangeLabel(d * 24) })
+  if (hours > 24 && !out.some((r) => r.hours === hours)) out.push({ hours, label: rangeLabel(hours) })
   return out
 }

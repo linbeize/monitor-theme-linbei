@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 
 import { heatGrid, latencyHeat, latencySpan, lossTint, type HeatPoint } from "@/lib/heatmap"
 import { ms } from "@/lib/pingstats"
+import { t as tr } from "@/lib/i18n"
 
 /**
  * 详情页「网络延迟」页签下方的热力图（1.13.0）：选 2~31 天的范围时出现。
@@ -16,8 +17,8 @@ export function LatencyHeatmap({ series }: {
   return (
     <section className="rounded-2xl border bg-card px-4 py-3 text-card-foreground shadow-lg shadow-border/60 dark:shadow-none">
       <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h3 className="text-xs font-medium text-muted-foreground">按小时分布（本地时间）</h3>
-        <div className="flex rounded-md border p-0.5 text-xs" role="group" aria-label="热力图显示">
+        <h3 className="text-xs font-medium text-muted-foreground">{tr("按小时分布（本地时间）", "By hour (local time)")}</h3>
+        <div className="flex rounded-md border p-0.5 text-xs" role="group" aria-label={tr("热力图显示", "Heatmap metric")}>
           {(["loss", "latency"] as const).map((k) => (
             <button
               key={k}
@@ -26,12 +27,14 @@ export function LatencyHeatmap({ series }: {
               onClick={() => setMode(k)}
               className={`rounded px-2 py-0.5 ${mode === k ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
             >
-              {k === "loss" ? "丢包" : "延迟"}
+              {k === "loss" ? tr("丢包", "Loss") : tr("延迟", "Latency")}
             </button>
           ))}
         </div>
         <span className="text-[11px] text-muted-foreground">
-          {mode === "loss" ? "绿＝不丢，越红丢得越多（30% 以上最红）" : "每张图内从快（绿）到慢（红）"}
+          {mode === "loss"
+            ? tr("绿＝不丢，越红丢得越多（30% 以上最红）", "Green = no loss, redder = more loss (30%+ is darkest)")
+            : tr("每张图内从快（绿）到慢（红）", "Within each map: fast (green) to slow (red)")}
         </span>
       </div>
       <div className="grid gap-x-6 gap-y-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -82,8 +85,8 @@ function Row({ label, row, name, mode, span }: {
             className={`h-3 rounded-[2px] ${c.n === 0 ? "bg-muted/50" : ""}`}
             style={bg ? { background: bg } : undefined}
             title={c.n === 0
-              ? `${label} ${h}:00 · 无数据`
-              : `${name} · ${label} ${h}:00–${h + 1}:00 · 丢包 ${(c.loss ?? 0).toFixed(1)}% · 中位 ${ms(c.median)} ms`}
+              ? `${label} ${h}:00 · ${tr("无数据", "no data")}`
+              : `${name} · ${label} ${h}:00–${h + 1}:00 · ${tr("丢包", "loss")} ${(c.loss ?? 0).toFixed(1)}% · ${tr("中位", "median")} ${ms(c.median)} ms`}
           />
         )
       })}

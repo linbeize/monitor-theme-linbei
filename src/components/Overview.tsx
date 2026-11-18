@@ -5,6 +5,7 @@ import { bytes, rate } from "@/lib/format"
 import {
   DEFAULT_FILTER, EXPIRING_DAYS, isDefault, SORTS, STATUSES, summarize, type ListFilter, type Summary,
 } from "@/lib/overview"
+import { plural, t as tr } from "@/lib/i18n"
 
 /**
  * 首页卡片上方的两块（1.12.0）：
@@ -28,13 +29,13 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
   return (
     <div className="mb-4 space-y-3">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label="在线" value={`${s.online} / ${s.total}`} sub={s.online < s.total ? `${s.total - s.online} 台离线` : "全部在线"} />
-        <Tile label="实时总网速" value={`↓ ${rate(s.rx)}`} sub={`↑ ${rate(s.tx)}`} />
-        <Tile label="本月总流量" value={bytes(s.month)} sub="所有机器上下行合计" />
+        <Tile label={tr("在线", "Online")} value={`${s.online} / ${s.total}`} sub={s.online < s.total ? tr(`${s.total - s.online} 台离线`, `${s.total - s.online} offline`) : tr("全部在线", "All online")} />
+        <Tile label={tr("实时总网速", "Total speed")} value={`↓ ${rate(s.rx)}`} sub={`↑ ${rate(s.tx)}`} />
+        <Tile label={tr("本月总流量", "Traffic this month")} value={bytes(s.month)} sub={tr("所有机器上下行合计", "Up + down, all nodes")} />
         <Tile
-          label="即将到期"
-          value={`${s.expiring} 台`}
-          sub={`${EXPIRING_DAYS} 天内（含已过期）`}
+          label={tr("即将到期", "Expiring soon")}
+          value={tr(`${s.expiring} 台`, plural(s.expiring, "node"))}
+          sub={tr(`${EXPIRING_DAYS} 天内（含已过期）`, `Next ${EXPIRING_DAYS} days`)}
           tone={s.expiring > 0 ? "warn" : undefined}
           active={filter.st === "expiring"}
           onClick={s.expiring > 0 ? () => set({ st: filter.st === "expiring" ? "all" : "expiring" }) : undefined}
@@ -48,12 +49,12 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
             type="search"
             value={filter.q}
             onChange={(e) => set({ q: e.target.value })}
-            placeholder="搜索名字、地区、系统、备注"
-            aria-label="搜索节点"
+            placeholder={tr("搜索名字、地区、系统、备注", "Search name, region, OS, notes")}
+            aria-label={tr("搜索节点", "Search nodes")}
             className="h-8 w-full rounded-lg border bg-card pr-2 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
           />
         </label>
-        <div className="flex rounded-lg border bg-card p-0.5" role="group" aria-label="按状态筛选">
+        <div className="flex rounded-lg border bg-card p-0.5" role="group" aria-label={tr("按状态筛选", "Filter by status")}>
           {STATUSES.map((st) => (
             <button
               key={st.key}
@@ -64,18 +65,18 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
                 filter.st === st.key ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {st.label}
+              {st.label()}
             </button>
           ))}
         </div>
         <select
           value={filter.sort}
           onChange={(e) => set({ sort: e.target.value as ListFilter["sort"] })}
-          aria-label="排序"
+          aria-label={tr("排序", "Sort")}
           className="h-8 rounded-lg border bg-card px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         >
           {SORTS.map((o) => (
-            <option key={o.key} value={o.key}>{o.label}</option>
+            <option key={o.key} value={o.key}>{o.label()}</option>
           ))}
         </select>
         <button
@@ -83,12 +84,12 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
           onClick={onCompare}
           className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-card px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
-          <Activity className="size-3.5" aria-hidden />延迟对比
+          <Activity className="size-3.5" aria-hidden />{tr("延迟对比", "Latency")}
         </button>
       </div>
 
       {s.countries.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="按地区筛选">
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={tr("按地区筛选", "Filter by region")}>
           {s.countries.map(([cc, count]) => (
             <button
               key={cc}
@@ -110,13 +111,13 @@ export function Overview({ nodes, filter, onChange, shown, onCompare }: {
 
       {filtering && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>显示 {shown} / 共 {s.total} 台</span>
+          <span>{tr(`显示 ${shown} / 共 ${s.total} 台`, `Showing ${shown} of ${s.total}`)}</span>
           <button
             type="button"
             onClick={() => onChange({ ...DEFAULT_FILTER, sort: filter.sort })}
             className="inline-flex items-center gap-0.5 underline-offset-2 hover:text-foreground hover:underline"
           >
-            <X className="size-3" aria-hidden />清除筛选
+            <X className="size-3" aria-hidden />{tr("清除筛选", "Clear filters")}
           </button>
         </div>
       )}

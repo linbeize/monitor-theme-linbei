@@ -1,4 +1,5 @@
 import { pingStats } from "./pingstats.ts"
+import { t } from "./i18n.ts"
 
 /**
  * 「延迟对比」页（1.13.0）：所有节点 × 所有探测线路一张表。
@@ -44,7 +45,7 @@ export function columnsOf(all: (NodePing | undefined)[]): { id: number; name: st
     const seen = new Set((d.ping ?? []).map((p) => p.task_id))
     for (const id of seen) {
       if (typeof id !== "number" || names.has(id)) continue
-      names.set(id, d.probes?.[String(id)] ?? `探测 ${id}`)
+      names.set(id, d.probes?.[String(id)] ?? t(`探测 ${id}`, `Probe ${id}`))
     }
   }
   return [...names].sort((a, b) => a[0] - b[0]).map(([id, name]) => ({ id, name }))

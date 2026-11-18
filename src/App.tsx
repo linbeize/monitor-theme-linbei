@@ -9,6 +9,7 @@ import { api, useNodes, type Node } from "@/lib/api"
 import { useLocalFarm } from "@/lib/farm-entry"
 import { applyFilter, readFilter, writeFilter, type ListFilter } from "@/lib/overview"
 import { FarmIcon } from "@/components/FarmIcon"
+import { setLang, t as tr, useLang } from "@/lib/i18n"
 
 type Me = {
   authed: boolean
@@ -233,6 +234,8 @@ function useTheme() {
 export default function App() {
   // 明暗：默认跟访客的系统走，访客点过顶栏那枚图标就以他记下的为准（1.6.0 起没有设置项）。
   const [dark, toggleTheme] = useTheme()
+  // 语言（1.14.0）：订阅在这里，语言一变整棵树重渲染、各处 tr() 现取（见 @/lib/i18n）。
+  const lang = useLang()
   // 顶栏那枚入口图标（1.25.0 起没有设置项）：挂载即探一次本站约定的 `/chicken/`，
   // 装了那座小鸡农场才出现、没装不占位（判据是内容而不是状态码，见 useLocalFarm）。
   const farmUrl = useLocalFarm()
@@ -249,7 +252,7 @@ export default function App() {
     // 但网络层/旧路径仍可能给空串；这一层别让重试按钮因此消失。
     return api<Me>("/me")
       .then((next) => { setMe(next); setMeError("") })
-      .catch((e: Error) => setMeError(e.message || "网络错误"))
+      .catch((e: Error) => setMeError(e.message || tr("网络错误", "Network error")))
   }, [])
 
   useEffect(() => {
@@ -372,7 +375,7 @@ export default function App() {
   // failure belongs beside the page rather than over it.
   if (!me) return (
     <div className="grid min-h-svh place-items-center p-6 text-sm text-muted-foreground">
-      {meError ? <div className="space-y-3 text-center"><p role="alert">加载失败：{meError}</p><Button onClick={loadMe}>重试</Button></div> : "加载中…"}
+      {meError ? <div className="space-y-3 text-center"><p role="alert">{tr("加载失败：", "Failed to load: ")}{meError}</p><Button onClick={loadMe}>{tr("重试", "Retry")}</Button></div> : tr("加载中…", "Loading…")}
     </div>
   )
 
@@ -419,8 +422,8 @@ export default function App() {
           <Button variant="ghost" size="icon" asChild>
             <a
               href="/admin/"
-              title={me.authed ? "进入后台" : "登录"}
-              aria-label={me.authed ? "进入后台" : "登录"}
+              title={me.authed ? tr("进入后台", "Admin panel") : tr("登录", "Sign in")}
+              aria-label={me.authed ? tr("进入后台", "Admin panel") : tr("登录", "Sign in")}
             >
               <Wrench />
             </a>
@@ -429,7 +432,7 @@ export default function App() {
               同域，就在当前标签页里打开。 */}
           {farmUrl && (
             <Button variant="ghost" size="icon" asChild>
-              <a href={farmUrl} title="农场入口" aria-label="农场入口">
+              <a href={farmUrl} title={tr("农场入口", "Farm")} aria-label={tr("农场入口", "Farm")}>
                 <FarmIcon />
               </a>
             </Button>
@@ -440,10 +443,22 @@ export default function App() {
             onClick={toggleTheme}
             data-theme-toggle=""
             // 动态说「点下去会发生什么」：固定的「切换主题」读屏不知道当前明暗（2026-10-20 审出）。
-            title={dark ? "切换到浅色主题" : "切换到深色主题"}
-            aria-label={dark ? "切换到浅色主题" : "切换到深色主题"}
+            title={dark ? tr("切换到浅色主题", "Switch to light theme") : tr("切换到深色主题", "Switch to dark theme")}
+            aria-label={dark ? tr("切换到浅色主题", "Switch to light theme") : tr("切换到深色主题", "Switch to dark theme")}
           >
             {dark ? <Sun /> : <Moon />}
+          </Button>
+          {/* 语言切换（1.14.0）：显示的是「点下去会切到的那种语言」，与明暗那枚同一个思路。
+              默认跟浏览器；点过就记住，点回与浏览器一致的那一档＝重新跟浏览器走。 */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setLang(lang === "zh" ? "en" : "zh")}
+            title={lang === "zh" ? "Switch to English" : "切换到中文"}
+            aria-label={lang === "zh" ? "Switch to English" : "切换到中文"}
+            className="text-[13px] font-medium"
+          >
+            {lang === "zh" ? "EN" : "中"}
           </Button>
           </div>
         </div>
@@ -462,7 +477,7 @@ export default function App() {
             </Suspense>
           ) : (
             <p className="py-16 text-center text-sm text-muted-foreground">
-              节点不存在或未公开。<button className="underline" onClick={openList}>返回列表</button>
+              {tr("节点不存在或未公开。", "This node doesn't exist or isn't public. ")}<button className="underline" onClick={openList}>{tr("返回列表", "Back to list")}</button>
             </p>
           )
         ) : comparing && nodes ? (
@@ -493,7 +508,7 @@ export default function App() {
               nodes={filtered}
               onOpen={openNode}
               onWarm={warmDetail}
-              empty={sorted.length === 0 ? "还没有节点" : "没有符合条件的节点"}
+              empty={sorted.length === 0 ? tr("还没有节点", "No nodes yet") : tr("没有符合条件的节点", "No nodes match the filters")}
             />
           </>
         )}
